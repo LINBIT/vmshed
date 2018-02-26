@@ -1,0 +1,3 @@
+{"vms":2, "tests": ["add-connect-delete", "add-path-multiple-times", "connect", "fencing", "initial-resync", "misaligned-bio", "multi-path", "ref-count", "resize", "stress-connect-and-2pc", "switch-primaries", "verify"], "samevms":["initial-resync"]}
+{"vms":3, "tests": ["diskless", "outdate", "pre-existing-data", "quorum"]}
+{"vms":5, "tests": ["connect", "diskless", "fencing", "initial-resync", "outdate", "quorum", "resize", "stress-connect-and-2pc", "switch-primaries"], "samevms":["initial-resync"]}
