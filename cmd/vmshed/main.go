@@ -261,7 +261,9 @@ func execTests(tests []test, nrVMs int, vmPool chan vmInstance) (int, error) {
 				}
 				fmt.Println("===========================================================================")
 				fmt.Printf("| ** Results for %s - %s\n", testOut, state)
-				fmt.Printf("| ** %s/artifact/%s\n", os.Getenv("BUILD_URL"), testDirOut)
+				if isJenkins() {
+					fmt.Printf("| ** %s/artifact/%s\n", os.Getenv("BUILD_URL"), testDirOut)
+				}
 				fmt.Println("===========================================================================")
 				testLog := testRes.Log()
 				fmt.Print(&testLog)
