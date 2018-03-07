@@ -504,18 +504,18 @@ func jenkinsXMLLog(restultsDir, name string, testRes *testResult, buf *bytes.Buf
 	}
 	defer f.Close()
 
-	var status int
+	var nrFailed int
 	if testRes.err != nil {
-		status = 1
+		nrFailed = 1 // currently there is only one test per execution
 	}
 	// header := fmt.Sprintf("<?xml version=\"1.0\" encoding=\"UTF-8\"?><testsuite tests=\"1\" failures=\"0\" errors=\"%d\">\n", status)
-	header := fmt.Sprintf("<testsuite tests=\"1\" failures=\"%d\" assertions=\"1\">\n", status)
+	header := fmt.Sprintf("<testsuite tests=\"1\" failures=\"%d\" assertions=\"1\">\n", nrFailed)
 	header += fmt.Sprintf("<testcase classname=\"test.%s\" name=\"%s.run\" time=\"%.2f\">", name, name, testRes.execTime.Seconds())
 	header += "<system-out>\n<![CDATA[\n"
 	f.WriteString(header)
 	f.Write(re.ReplaceAllLiteral(buf.Bytes(), []byte{' '}))
 	f.WriteString("]]></system-out>\n")
-	if status == 1 {
+	if nrFailed > 0 {
 		f.WriteString("<failure message=\"FAILED\"/>\n")
 	}
 	f.WriteString("</testcase></testsuite>")
