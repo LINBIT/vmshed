@@ -394,7 +394,7 @@ func startVMs(res *testResult, same bool, controller vmInstance, testnodes ...vm
 		// TODO(rck:) This is the test specific part, if we integrate more projects, factor that out.
 		payloads := "sshd;shell"
 		if n.nr != controller.nr {
-			payloads = "lvm;loaddrbd;" + payloads
+			payloads = "lvm;networking;loaddrbd;" + payloads
 		}
 		argv = []string{"systemd-run", "--unit=" + unitName, "--scope",
 			"./ch2vm.sh", n.Distribution, n.Kernel, fmt.Sprintf("%d", n.nr), payloads}
