@@ -346,7 +346,6 @@ func execTest(ctx context.Context, test string, same bool, vmPool chan<- vmInsta
 	payload := fmt.Sprintf("d9ts:leader:tests=%s:undertest=%s",
 		test, strings.Join(testvms, ","))
 	argv := []string{"ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-		"-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=10",
 		fmt.Sprintf("root@vm-%d", controller.nr), "/payloads/d9ts", payload}
 
 	res.AppendLog(*quiet, "EXECUTING the actual test via ssh: %s", argv)
