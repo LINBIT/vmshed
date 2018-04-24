@@ -319,7 +319,7 @@ func execTest(ctx context.Context, test string, same bool, vmPool chan<- vmInsta
 
 	// Start VMs
 	start := time.Now()
-	err := startVMs(res, same, controller, testnodes...)
+	err := startVMs(test, res, same, controller, testnodes...)
 	defer shutdownVMs(res, controller, testnodes...)
 	if err != nil {
 		res.err = err
@@ -368,7 +368,7 @@ func execTest(ctx context.Context, test string, same bool, vmPool chan<- vmInsta
 // no parent ctx, we always (try) to do that
 // ch2vm has a lot of "intermediate state" (maybe too much). if we kill it "in the middle" we might for example end up with zfs leftovers
 // start and tear down are fast enough...
-func startVMs(res *testResult, same bool, controller vmInstance, testnodes ...vmInstance) error {
+func startVMs(test string, res *testResult, same bool, controller vmInstance, testnodes ...vmInstance) error {
 	allVMs := []vmInstance{controller}
 	if same {
 		for _, n := range testnodes {
@@ -394,6 +394,9 @@ func startVMs(res *testResult, same bool, controller vmInstance, testnodes ...vm
 		payloads := "sshd;shell"
 		if n.nr != controller.nr {
 			payloads = "lvm;networking;loaddrbd;" + payloads
+		} else if isJenkins() {
+			jdir := filepath.Join(*jenkins, "log", fmt.Sprintf("%s-%d", test, len(allVMs)-1))
+			payloads += fmt.Sprintf(";jenkins:jdir=%s:jtest=%s", jdir, test)
 		}
 		argv = []string{"systemd-run", "--unit=" + unitName, "--scope",
 			"./ch2vm.sh", n.Distribution, n.Kernel, fmt.Sprintf("%d", n.nr), payloads}
