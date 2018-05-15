@@ -342,15 +342,23 @@ func execTest(ctx context.Context, test string, same bool, vmPool chan<- vmInsta
 		testvms = append(testvms, fmt.Sprintf("vm-%d", t.nr))
 	}
 
-	start = time.Now()
-	//TODO(rck): This is specific to the drbd 9 tests, factor that out...
-	payload := fmt.Sprintf("d9ts:leader:tests=%s:undertest=%s",
-		test, strings.Join(testvms, ","))
+	var ts string
+	switch *testSuite {
+	case "drbd9":
+		ts = "d9ts"
+	case "linstor":
+		ts = "linstorts"
+	default:
+		ts = "doesnotexist"
+	}
+	payload := fmt.Sprintf("%s:leader:tests=%s:undertest=%s",
+		ts, test, strings.Join(testvms, ","))
 	argv := []string{"ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-		fmt.Sprintf("root@vm-%d", controller.nr), "/payloads/d9ts", payload}
+		fmt.Sprintf("root@vm-%d", controller.nr), "/payloads/" + ts, payload}
 
 	res.AppendLog(*quiet, "EXECUTING the actual test via ssh: %s", argv)
 
+	start = time.Now()
 	ctx, cancel := context.WithTimeout(ctx, *testTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
@@ -391,10 +399,14 @@ func startVMs(test string, res *testResult, same bool, controller vmInstance, te
 		// we don't care for the outcome, in be best case it helped, otherwise start will fail
 		exec.Command(argv[0], argv[1:]...).Run()
 
-		// TODO(rck:) This is the test specific part, if we integrate more projects, factor that out.
 		payloads := "sshd;shell"
 		if n.nr != controller.nr {
-			payloads = "lvm;networking;loaddrbd;" + payloads
+			op := payloads
+			payloads = "lvm;networking;loaddrbd;"
+			if *testSuite == "linstor" {
+				payloads += "preplinstor;"
+			}
+			payloads += op
 		}
 		argv = []string{"systemd-run", "--unit=" + unitName, "--scope",
 			"./ch2vm.sh", "-s", *testSuite, "-d", n.Distribution, "-k", n.Kernel, "-v", fmt.Sprintf("%d", n.nr), "-p", payloads}
