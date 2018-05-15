@@ -394,12 +394,15 @@ func startVMs(test string, res *testResult, same bool, controller vmInstance, te
 		payloads := "sshd;shell"
 		if n.nr != controller.nr {
 			payloads = "lvm;networking;loaddrbd;" + payloads
-		} else if isJenkins() {
-			jdir := filepath.Join(*jenkins, "log", fmt.Sprintf("%s-%d", test, len(allVMs)-1))
-			payloads += fmt.Sprintf(";jenkins:jdir=%s:jtest=%s", jdir, test)
 		}
 		argv = []string{"systemd-run", "--unit=" + unitName, "--scope",
 			"./ch2vm.sh", "-d", n.Distribution, "-k", n.Kernel, "-v", fmt.Sprintf("%d", n.nr), "-p", payloads}
+
+		if (n.nr == controller.nr) && isJenkins() {
+			jdir := filepath.Join(*jenkins, "log", fmt.Sprintf("%s-%d", test, len(allVMs)-1))
+			argv = append(argv, fmt.Sprintf("--jdir=%s", jdir))
+			argv = append(argv, fmt.Sprintf("--jtest=%s", test))
+		}
 
 		res.AppendLog(*quiet, "EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
