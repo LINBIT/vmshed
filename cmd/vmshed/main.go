@@ -101,6 +101,7 @@ var (
 
 	vmSpec      = flag.String("vms", "vms.json", "File containing VM specification")
 	testSpec    = flag.String("tests", "tests.json", "File containing test specification")
+	testSuite   = flag.String("suite", "drbd9", "Test suite to start")
 	startVM     = flag.Int("startvm", 1, "Number of the first VM to start in parallel")
 	nrVMs       = flag.Int("nvms", 12, "Maximum number of VMs to start in parallel, starting at -startvm")
 	failTest    = flag.Bool("failtest", false, "Stop executing tests when the first one failed")
@@ -396,7 +397,7 @@ func startVMs(test string, res *testResult, same bool, controller vmInstance, te
 			payloads = "lvm;networking;loaddrbd;" + payloads
 		}
 		argv = []string{"systemd-run", "--unit=" + unitName, "--scope",
-			"./ch2vm.sh", "-d", n.Distribution, "-k", n.Kernel, "-v", fmt.Sprintf("%d", n.nr), "-p", payloads}
+			"./ch2vm.sh", "-s", *testSuite, "-d", n.Distribution, "-k", n.Kernel, "-v", fmt.Sprintf("%d", n.nr), "-p", payloads}
 
 		if (n.nr == controller.nr) && isJenkins() {
 			jdir := filepath.Join(*jenkins, "log", fmt.Sprintf("%s-%d", test, len(allVMs)-1))
