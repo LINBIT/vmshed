@@ -399,7 +399,7 @@ func startVMs(test string, res *testResult, same bool, controller vmInstance, te
 			payloads += fmt.Sprintf(";jenkins:jdir=%s:jtest=%s", jdir, test)
 		}
 		argv = []string{"systemd-run", "--unit=" + unitName, "--scope",
-			"./ch2vm.sh", "-d", n.Distribution, "-k", n.Kernel, "-v", fmt.Sprintf("%d", n.nr), payloads}
+			"./ch2vm.sh", "-d", n.Distribution, "-k", n.Kernel, "-v", fmt.Sprintf("%d", n.nr), "-p", payloads}
 
 		res.AppendLog(*quiet, "EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
