@@ -412,7 +412,7 @@ func startVMs(test string, res *testResult, same bool, controller vmInstance, te
 			op := payloads
 			payloads = "lvm;networking;loaddrbd;"
 			if *testSuite == "linstor" {
-				payloads += "preplinstor;"
+				payloads += "linstor:combined;"
 			}
 			payloads += op
 		}
