@@ -21,6 +21,7 @@ import (
 
 	"github.com/nightlyone/lockfile"
 	"github.com/rck/errorlog"
+	uuid "github.com/satori/go.uuid"
 )
 
 type vm struct {
@@ -29,7 +30,8 @@ type vm struct {
 }
 
 type vmInstance struct {
-	nr int
+	nr          int
+	CurrentUUID string
 	vm
 }
 
@@ -312,6 +314,12 @@ func execTest(ctx context.Context, test string, same bool, vmPool chan<- vmInsta
 		}
 	}()
 
+	// set uuids
+	controller.CurrentUUID = uuid.Must(uuid.NewV4()).String()
+	for i := 0; i < len(testnodes); i++ {
+		testnodes[i].CurrentUUID = uuid.Must(uuid.NewV4()).String()
+	}
+
 	res := newTestResult(cmdName)
 
 	// always also print the header
@@ -409,7 +417,9 @@ func startVMs(test string, res *testResult, same bool, controller vmInstance, te
 			payloads += op
 		}
 		argv = []string{"systemd-run", "--unit=" + unitName, "--scope",
-			"./ch2vm.sh", "-s", *testSuite, "-d", n.Distribution, "-k", n.Kernel, "-v", fmt.Sprintf("%d", n.nr), "-p", payloads}
+			"./ch2vm.sh", "-s", *testSuite, "-d", n.Distribution, "-k", n.Kernel,
+			"--uuid", n.CurrentUUID,
+			"-v", fmt.Sprintf("%d", n.nr), "-p", payloads}
 
 		if (n.nr == controller.nr) && isJenkins() {
 			jdir := filepath.Join(*jenkins, "log", fmt.Sprintf("%s-%d", test, len(allVMs)-1))
@@ -468,8 +478,8 @@ func shutdownVMs(res *testResult, controller vmInstance, testnodes ...vmInstance
 
 		argv := []string{"systemctl", "stop", unitName + ".scope"}
 		res.AppendLog(*quiet, "EXECUTING: %s", argv)
-		if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
-			res.AppendLog(*quiet, "ERROR: Could not stop unit %s %v", unitName, err)
+		if stdouterr, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
+			res.AppendLog(*quiet, "ERROR: Could not stop unit %s %v: stdouterr: %s", unitName, err, stdouterr)
 			// do not return, keep going...
 		}
 	}
@@ -479,7 +489,7 @@ func shutdownVMs(res *testResult, controller vmInstance, testnodes ...vmInstance
 }
 
 func unitName(vm vmInstance) string {
-	return fmt.Sprintf("LBTEST-vm-%d", vm.nr)
+	return fmt.Sprintf("LBTEST-vm-%d-%s", vm.nr, vm.CurrentUUID)
 }
 
 func ctxCancled(ctx context.Context) bool {
