@@ -112,6 +112,8 @@ var (
 	jenkins     = flag.String("jenkins", "", "If this is set to a path for the current job, text output is saved to files, logs get copied,...")
 	sshTimeout  = flag.Duration("sshping", 3*time.Minute, "Timeout for ssh pinging the controller node")
 	testTimeout = flag.Duration("testtime", 5*time.Minute, "Timeout for a single test execution in a VM")
+	ctrlDist    = flag.String("ctrldist", "", "If this is set, use this distribution for the controller VM, needs ctrlkernel set")
+	ctrlKernel  = flag.String("ctrlkernel", "", "If this is set, use this kernel for the controller VM, needs ctrldist set")
 )
 
 func main() {
@@ -386,6 +388,10 @@ func execTest(ctx context.Context, test string, same bool, vmPool chan<- vmInsta
 // ch2vm has a lot of "intermediate state" (maybe too much). if we kill it "in the middle" we might for example end up with zfs leftovers
 // start and tear down are fast enough...
 func startVMs(test string, res *testResult, same bool, controller vmInstance, testnodes ...vmInstance) error {
+	if *ctrlDist != "" && *ctrlKernel != "" {
+		controller.Distribution = *ctrlDist
+		controller.Kernel = *ctrlKernel
+	}
 	allVMs := []vmInstance{controller}
 	if same {
 		for _, n := range testnodes {
