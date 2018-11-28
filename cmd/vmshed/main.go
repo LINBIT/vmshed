@@ -13,8 +13,10 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -206,7 +208,7 @@ func main() {
 
 	if isJenkins() {
 		// transfer ownership to Jenkins, so that the workspace can be cleaned before running again
-		err := jenkinsSetOwner()
+		err := jenkinsSetOwner(*jenkins)
 		if err != nil {
 			log.Println(cmdName, "ERROR SETTING WORKSPACE OWNERSHIP:", err)
 		}
@@ -568,11 +570,25 @@ func jenkinsXMLLog(restultsDir, name string, testRes *testResult, buf *bytes.Buf
 	return nil
 }
 
-func jenkinsSetOwner() error {
-	argv := []string{"chown", "-R", "jenkins", *jenkins}
+func jenkinsSetOwner(path string) error {
+	jUser, err := user.Lookup("jenkins")
+	if err != nil {
+		return err
+	}
 
-	log.Println(cmdName, "EXECUTING:", argv)
+	uid, err := strconv.Atoi(jUser.Uid)
+	if err != nil {
+		return err
+	}
+	gid, err := strconv.Atoi(jUser.Gid)
+	if err != nil {
+		return err
+	}
 
-	cmd := exec.Command(argv[0], argv[1:]...)
-	return cmd.Run()
+	return filepath.Walk(path, func(name string, info os.FileInfo, err error) error {
+		if err == nil {
+			err = os.Chown(name, uid, gid)
+		}
+		return err
+	})
 }
