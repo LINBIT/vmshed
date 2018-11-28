@@ -203,6 +203,15 @@ func main() {
 	log.Println(cmdName, "OVERALL EXECUTIONTIME:", time.Since(start))
 
 	systemdScope.Wait()
+
+	if isJenkins() {
+		// transfer ownership to Jenkins, so that the workspace can be cleaned before running again
+		err := jenkinsSetOwner()
+		if err != nil {
+			log.Println(cmdName, "ERROR SETTING WORKSPACE OWNERSHIP:", err)
+		}
+	}
+
 	os.Exit(nFailed)
 }
 
@@ -427,7 +436,7 @@ func startVMs(test string, res *testResult, same bool, controller vmInstance, te
 			"--uuid", n.CurrentUUID,
 			"-v", fmt.Sprintf("%d", n.nr), "-p", payloads}
 
-		if (n.nr == controller.nr) && isJenkins() {
+		if isJenkins() {
 			jdir := filepath.Join(*jenkins, "log", fmt.Sprintf("%s-%d", test, len(allVMs)-1))
 			argv = append(argv, fmt.Sprintf("--jdir=%s", jdir))
 			argv = append(argv, fmt.Sprintf("--jtest=%s", test))
@@ -557,4 +566,13 @@ func jenkinsXMLLog(restultsDir, name string, testRes *testResult, buf *bytes.Buf
 	f.WriteString("</testcase></testsuite>")
 
 	return nil
+}
+
+func jenkinsSetOwner() error {
+	argv := []string{"chown", "-R", "jenkins", *jenkins}
+
+	log.Println(cmdName, "EXECUTING:", argv)
+
+	cmd := exec.Command(argv[0], argv[1:]...)
+	return cmd.Run()
 }
