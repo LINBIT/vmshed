@@ -386,8 +386,11 @@ func execTest(ctx context.Context, test string, same bool, vmPool chan<- vmInsta
 	out, testErr := cmd.CombinedOutput()
 	res.AppendInVM(true, "%s\n", out)
 	res.AppendLog(*quiet, "EXECUTIONTIME: %s %v", testInstance, time.Since(start))
-	if testErr != nil {
+	if testErr != nil { // "real" error or ctx canceled
 		res.err = fmt.Errorf("ERROR: %s %v", testInstance, testErr)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			res.err = fmt.Errorf("%v %v", res.err, ctxErr)
+		}
 		return res
 	}
 	res.AppendLog(*quiet, "SUCCESS: %s", testInstance)
