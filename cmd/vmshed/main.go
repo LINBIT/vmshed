@@ -27,9 +27,12 @@ import (
 )
 
 type vm struct {
-	Distribution string `"json:distribution"`
-	Kernel       string `"json:kernel"`
+	Distribution string `json:"distribution"`
+	Kernel       string `json:"kernel"`
+	HasZFS       bool   `json:"zfs"`
 }
+
+var zfsVMs []vm
 
 type vmInstance struct {
 	nr          int
@@ -37,10 +40,15 @@ type vmInstance struct {
 	vm
 }
 
-type test struct {
-	VMs     int      `"json:vms"`
-	Tests   []string `"json:tests"`
-	SameVMs []string `"json:samevms"`
+type testGroup struct {
+	VMs     int      `json:"vms"`
+	Tests   []string `json:"tests"`
+	SameVMs []string `json:"samevms"` // tests that need the same Distribution
+	NeedZFS []string `json:"needzfs"` // tests that need the zfs in their VM
+}
+
+type testOption struct {
+	needsSameVMs, needsZFS bool
 }
 
 // collect information about individual test runs
@@ -155,6 +163,9 @@ func main() {
 			log.Fatal(err)
 		}
 		vms = append(vms, vm)
+		if vm.HasZFS {
+			zfsVMs = append(zfsVMs, vm)
+		}
 	}
 
 	testFile, err := os.Open(*testSpec)
@@ -164,9 +175,9 @@ func main() {
 
 	dec = json.NewDecoder(testFile)
 
-	var tests []test
+	var tests []testGroup
 	for {
-		var test test
+		var test testGroup
 		if err := dec.Decode(&test); err == io.EOF {
 			break
 		} else if err != nil {
@@ -183,6 +194,7 @@ func main() {
 		rndVM := vms[rand.Intn(len(vms))]
 		vm.Distribution = rndVM.Distribution
 		vm.Kernel = rndVM.Kernel
+		vm.HasZFS = rndVM.HasZFS
 
 		vmPool <- vm
 
@@ -217,7 +229,7 @@ func main() {
 	os.Exit(nFailed)
 }
 
-func execTests(tests []test, nrVMs int, vmPool chan vmInstance) (int, error) {
+func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -232,10 +244,16 @@ func execTests(tests []test, nrVMs int, vmPool chan vmInstance) (int, error) {
 		var testGrpWG sync.WaitGroup
 		start := time.Now()
 		for _, t := range testGrp.Tests {
-			var same bool
+			var to testOption
 			for _, s := range testGrp.SameVMs {
 				if s == t {
-					same = true
+					to.needsSameVMs = true
+					break
+				}
+			}
+			for _, z := range testGrp.NeedZFS {
+				if z == t {
+					to.needsZFS = true
 					break
 				}
 			}
@@ -251,11 +269,11 @@ func execTests(tests []test, nrVMs int, vmPool chan vmInstance) (int, error) {
 			}
 
 			testGrpWG.Add(1)
-			go func(st string, same bool, controler vmInstance, testnodes ...vmInstance) {
+			go func(st string, to testOption, controler vmInstance, testnodes ...vmInstance) {
 				defer testGrpWG.Done()
 
 				stTest := time.Now()
-				testRes := execTest(ctx, st, same, vmPool, controller, testnodes...)
+				testRes := execTest(ctx, st, to, vmPool, controller, testnodes...)
 				if err := testRes.err; err != nil {
 					errs.Append(err)
 					if *failTest {
@@ -298,7 +316,7 @@ func execTests(tests []test, nrVMs int, vmPool chan vmInstance) (int, error) {
 					fmt.Print(&inVM)
 				}
 				fmt.Printf("END Results for %s\n", testOut)
-			}(t, same, controller, vms...)
+			}(t, to, controller, vms...)
 
 		}
 		testGrpWG.Wait()
@@ -319,13 +337,22 @@ func execTests(tests []test, nrVMs int, vmPool chan vmInstance) (int, error) {
 	return overallFailed, nil
 }
 
-func execTest(ctx context.Context, test string, same bool, vmPool chan<- vmInstance, controller vmInstance, testnodes ...vmInstance) *testResult {
+func execTest(ctx context.Context, test string, to testOption, vmPool chan<- vmInstance, origController vmInstance, origTestnodes ...vmInstance) *testResult {
+	res := newTestResult(cmdName)
+
+	// we always want to hand back the random VMS
 	defer func() {
-		vmPool <- controller
-		for _, vm := range testnodes {
+		vmPool <- origController
+		for _, vm := range origTestnodes {
 			vmPool <- vm
 		}
 	}()
+	// but we might need to actually start different ones
+	controller, testnodes, err := finalVMs(to, origController, origTestnodes...)
+	if err != nil {
+		res.err = err
+		return res
+	}
 
 	// set uuids
 	controller.CurrentUUID = uuid.Must(uuid.NewV4()).String()
@@ -333,15 +360,13 @@ func execTest(ctx context.Context, test string, same bool, vmPool chan<- vmInsta
 		testnodes[i].CurrentUUID = uuid.Must(uuid.NewV4()).String()
 	}
 
-	res := newTestResult(cmdName)
-
 	// always also print the header
 	testInstance := fmt.Sprintf("%s-%d", test, len(testnodes))
 	res.AppendLog(false, "EXECUTING: %s in %+v Nodes(%+v)", testInstance, controller, testnodes)
 
 	// Start VMs
 	start := time.Now()
-	err := startVMs(test, res, same, controller, testnodes...)
+	err = startVMs(test, res, to, controller, testnodes...)
 	defer shutdownVMs(res, controller, testnodes...)
 	if err != nil {
 		res.err = err
@@ -398,26 +423,54 @@ func execTest(ctx context.Context, test string, same bool, vmPool chan<- vmInsta
 	return res
 }
 
-// no parent ctx, we always (try) to do that
-// ch2vm has a lot of "intermediate state" (maybe too much). if we kill it "in the middle" we might for example end up with zfs leftovers
-// start and tear down are fast enough...
-func startVMs(test string, res *testResult, same bool, controller vmInstance, testnodes ...vmInstance) error {
+func finalVMs(to testOption, origController vmInstance, origTestnodes ...vmInstance) (vmInstance, []vmInstance, error) {
+	controller := origController
+	testnodes := origTestnodes
+
+	if to.needsZFS && len(zfsVMs) == 0 {
+		return controller, testnodes, errors.New("You required ZFS, but none of your test VMs supports it")
+	}
+
 	if *ctrlDist != "" && *ctrlKernel != "" {
 		controller.Distribution = *ctrlDist
 		controller.Kernel = *ctrlKernel
 	}
-	allVMs := []vmInstance{controller}
-	if same {
-		for _, n := range testnodes {
-			// vm := n
-			n.Distribution = controller.Distribution
-			n.Kernel = controller.Kernel
-			allVMs = append(allVMs, n)
+	for _, n := range zfsVMs {
+		if controller.Distribution == n.Distribution && controller.Kernel == n.Kernel {
+			controller.HasZFS = true
+			break
 		}
-	} else {
-		allVMs = append(allVMs, testnodes...)
 	}
 
+	if to.needsSameVMs {
+		if to.needsZFS {
+			if !controller.HasZFS {
+				return controller, testnodes, fmt.Errorf("Controller node (%s:%s) does not have ZFS support", controller.Distribution, controller.Kernel)
+			}
+		}
+		for i := range testnodes {
+			testnodes[i].Distribution = controller.Distribution
+			testnodes[i].Kernel = controller.Kernel
+			testnodes[i].HasZFS = controller.HasZFS
+		}
+	} else if to.needsZFS {
+		for i := range testnodes {
+			zfsNode := zfsVMs[rand.Int31n(int32(len(zfsVMs)))]
+			testnodes[i].Distribution = zfsNode.Distribution
+			testnodes[i].Kernel = zfsNode.Kernel
+			testnodes[i].HasZFS = zfsNode.HasZFS
+		}
+	}
+
+	return controller, testnodes, nil
+}
+
+// no parent ctx, we always (try) to do that
+// ch2vm has a lot of "intermediate state" (maybe too much). if we kill it "in the middle" we might for example end up with zfs leftovers
+// start and tear down are fast enough...
+func startVMs(test string, res *testResult, to testOption, controller vmInstance, testnodes ...vmInstance) error {
+	allVMs := []vmInstance{controller}
+	allVMs = append(allVMs, testnodes...)
 	for _, n := range allVMs {
 		unitName := unitName(n)
 
@@ -430,7 +483,11 @@ func startVMs(test string, res *testResult, same bool, controller vmInstance, te
 		payloads := "sshd;shell"
 		if n.nr != controller.nr {
 			op := payloads
-			payloads = "lvm;networking;loaddrbd;"
+			pool := "lvm"
+			if to.needsZFS {
+				pool = "zfs"
+			}
+			payloads = fmt.Sprintf("%s;networking;loaddrbd;", pool)
 			if *testSuite == "linstor" {
 				payloads += "linstor:combined;"
 			}
