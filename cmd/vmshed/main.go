@@ -22,6 +22,8 @@ var zfsVMs []vm
 
 var systemdScope sync.WaitGroup
 
+var jenkins *Jenkins
+
 var (
 	cmdName = filepath.Base(os.Args[0])
 
@@ -33,7 +35,7 @@ var (
 	failTest    = flag.Bool("failtest", false, "Stop executing tests when the first one failed")
 	failGrp     = flag.Bool("failgroup", false, "Stop executing tests when at least one failed in the test group")
 	quiet       = flag.Bool("quiet", false, "Don't print progess messages while tests are running")
-	jenkins     = flag.String("jenkins", "", "If this is set to a path for the current job, text output is saved to files, logs get copied,...")
+	jenkinsWS   = flag.String("jenkins", "", "If this is set to a path for the current job, text output is saved to files, logs get copied,...")
 	sshTimeout  = flag.Duration("sshping", 3*time.Minute, "Timeout for ssh pinging the controller node")
 	testTimeout = flag.Duration("testtime", 5*time.Minute, "Timeout for a single test execution in a VM")
 	ctrlDist    = flag.String("ctrldist", "", "If this is set, use this distribution for the controller VM, needs ctrlkernel set")
@@ -50,16 +52,7 @@ func main() {
 		log.Fatal(cmdName, "-nvms has to be positive")
 	}
 
-	if isJenkins() {
-		if !filepath.IsAbs(*jenkins) {
-			log.Fatal(cmdName, *jenkins, "is not an absolute path")
-		}
-		if st, err := os.Stat(*jenkins); err != nil {
-			log.Fatal(cmdName, "Could not stat ", *jenkins, err)
-		} else if !st.IsDir() {
-			log.Fatal(cmdName, *jenkins, "is not a directory")
-		}
-	}
+	jenkins = NewJenkinsMust(*jenkinsWS)
 
 	vmFile, err := os.Open(*vmSpec)
 	if err != nil {
@@ -132,12 +125,9 @@ func main() {
 
 	systemdScope.Wait()
 
-	if isJenkins() {
-		// transfer ownership to Jenkins, so that the workspace can be cleaned before running again
-		err := jenkinsSetOwner(*jenkins)
-		if err != nil {
-			log.Println(cmdName, "ERROR SETTING WORKSPACE OWNERSHIP:", err)
-		}
+	// transfer ownership to Jenkins, so that the workspace can be cleaned before running again
+	if err := jenkins.OwnWorkspace(); err != nil {
+		log.Println(cmdName, "ERROR SETTING WORKSPACE OWNERSHIP:", err)
 	}
 
 	os.Exit(nFailed)

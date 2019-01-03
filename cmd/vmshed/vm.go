@@ -51,8 +51,8 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 			"--uuid", n.CurrentUUID,
 			"-v", fmt.Sprintf("%d", n.nr), "-p", payloads}
 
-		if isJenkins() {
-			jdir := filepath.Join(*jenkins, "log", fmt.Sprintf("%s-%d", test, len(allVMs)-1))
+		if jenkins.IsActive() {
+			jdir := filepath.Join(*jenkinsWS, "log", fmt.Sprintf("%s-%d", test, len(allVMs)-1))
 			argv = append(argv, fmt.Sprintf("--jdir=%s", jdir))
 			argv = append(argv, fmt.Sprintf("--jtest=%s", test))
 		}

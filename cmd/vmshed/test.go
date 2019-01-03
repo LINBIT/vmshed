@@ -148,7 +148,7 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 				}
 				fmt.Println("===========================================================================")
 				fmt.Printf("| ** Results for %s - %s\n", testOut, state)
-				if isJenkins() {
+				if jenkins.IsActive() {
 					fmt.Printf("| ** %s/artifact/%s\n", os.Getenv("BUILD_URL"), testDirOut)
 				}
 				fmt.Println("===========================================================================")
@@ -156,12 +156,12 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 				fmt.Print(&testLog)
 
 				inVM := testRes.InVM()
-				if isJenkins() {
-					if err := jenkinsLog(testDirOut, "inVM.log", &inVM); err != nil {
+				if jenkins.IsActive() {
+					if err := jenkins.Log(testDirOut, "inVM.log", &inVM); err != nil {
 						errs.Append(err)
 					}
 
-					if err := jenkinsXMLLog("test-results", testOut, testRes, &inVM); err != nil {
+					if err := jenkins.XMLLog("test-results", testOut, testRes, &inVM); err != nil {
 						errs.Append(err)
 					}
 				} else {
