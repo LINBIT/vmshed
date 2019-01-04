@@ -12,15 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/nightlyone/lockfile"
 )
 
 var zfsVMs []vm
-
-var systemdScope sync.WaitGroup
 
 var jenkins *Jenkins
 
@@ -122,8 +119,6 @@ func main() {
 		log.Println(cmdName, "ERROR:", err)
 	}
 	log.Println(cmdName, "OVERALL EXECUTIONTIME:", time.Since(start))
-
-	systemdScope.Wait()
 
 	// transfer ownership to Jenkins, so that the workspace can be cleaned before running again
 	if err := jenkins.OwnWorkspace(); err != nil {

@@ -16,6 +16,9 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
+// TODO(rck): rm, this is nasty
+var systemdScope sync.WaitGroup // VM starts (via systemd Add(1), and defer a go routine that waits. Use this as a signal that all VMs terminated after every group of tests
+
 type testGroup struct {
 	VMs     int      `json:"vms"`
 	Tests   []string `json:"tests"`
@@ -100,7 +103,7 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 	defer cancel()
 
 	var overallFailed int
-	var testLogLock sync.Mutex
+	var testLogLock sync.Mutex // tests run in parallel, but we want the result blocks/logs somehow serialized.
 	for _, testGrp := range tests {
 		if testGrp.VMs+1 > nrVMs { // +1 for the coordinator
 			return 1, fmt.Errorf("This test group requires %d VMs (and a controller), but we only have %d VMs overall", testGrp.VMs, nrVMs)
@@ -186,6 +189,7 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 
 		}
 		testGrpWG.Wait()
+		systemdScope.Wait()
 		log.Println(cmdName, "Group:", testGrp.VMs, "EXECUTIONTIME for Group:", testGrp.VMs, time.Since(start))
 
 		nErrs := errs.Len()
