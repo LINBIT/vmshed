@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -61,41 +61,50 @@ func (j *Jenkins) createSubDir(subdir string) (string, error) {
 	return p, os.MkdirAll(p, 0755)
 }
 
-// Log writes an arbitrary log file to, where "test" is a subdirectory in the Jenkins workspace, and "name" is the name of the file to write to
-func (j *Jenkins) Log(test, name string, buf *bytes.Buffer) error {
+// Log writes an arbitrary log file, where "test" is a subdirectory in the Jenkins workspace, and "name" is the name of the file to write to.
+func (j *Jenkins) Log(test, name string, r io.Reader) error {
 	p, err := j.createSubDir(test)
 	if err != nil {
 		return err
 	}
 
-	return ioutil.WriteFile(filepath.Join(p, name), buf.Bytes(), 0644)
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	return ioutil.WriteFile(filepath.Join(p, name), b, 0644)
 }
 
-func (j *Jenkins) XMLLog(restultsDir, name string, testRes *testResult, buf *bytes.Buffer) error {
+func (j *Jenkins) XMLLog(restultsDir, testName string, testRes TestResulter, r io.Reader) error {
 	// Used to remove invalid runes from the output.
 	re, err := regexp.Compile("[^\t\n\r\x20-\x7e]")
 	if err != nil {
 		return err
 	}
 
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		return err
+	}
+
 	p, err := j.createSubDir(restultsDir)
 
-	f, err := os.Create(filepath.Join(p, name+".xml"))
+	f, err := os.Create(filepath.Join(p, testName+".xml"))
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
 	var nrFailed int
-	if testRes.err != nil {
+	if testRes.Err() != nil {
 		nrFailed = 1 // currently there is only one test per execution
 	}
 	// header := fmt.Sprintf("<?xml version=\"1.0\" encoding=\"UTF-8\"?><testsuite tests=\"1\" failures=\"0\" errors=\"%d\">\n", status)
 	header := fmt.Sprintf("<testsuite tests=\"1\" failures=\"%d\" assertions=\"1\">\n", nrFailed)
-	header += fmt.Sprintf("<testcase classname=\"test.%s\" name=\"%s.run\" time=\"%.2f\">", name, name, testRes.execTime.Seconds())
+	header += fmt.Sprintf("<testcase classname=\"test.%s\" name=\"%s.run\" time=\"%.2f\">", testName, testName, testRes.ExecTime().Seconds())
 	header += "<system-out>\n<![CDATA[\n"
 	f.WriteString(header)
-	f.Write(re.ReplaceAllLiteral(buf.Bytes(), []byte{' '}))
+	f.Write(re.ReplaceAllLiteral(b, []byte{' '}))
 	f.WriteString("]]></system-out>\n")
 	if nrFailed > 0 {
 		f.WriteString("<failure message=\"FAILED\"/>\n")

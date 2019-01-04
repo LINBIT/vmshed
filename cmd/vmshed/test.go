@@ -27,6 +27,11 @@ type testOption struct {
 	needsSameVMs, needsZFS bool
 }
 
+type TestResulter interface {
+	ExecTime() time.Duration
+	Err() error
+}
+
 // collect information about individual test runs
 // the interface is similar to the log package (which it also uses)
 // TODO(rck): we have one per test, and the mutex only protects the overall log, but not access to the buffer, this would require getters/extra pkg.
@@ -49,6 +54,14 @@ func newTestResult(prefix string) *testResult {
 	tr.logLogger = log.New(&tr.log, p, log.Ldate)
 	tr.inVMLogger = log.New(&tr.inVM, p, log.Ldate)
 	return &tr
+}
+
+func (r *testResult) ExecTime() time.Duration {
+	return r.execTime
+}
+
+func (r *testResult) Err() error {
+	return r.err
 }
 
 func (r *testResult) Log() bytes.Buffer {
