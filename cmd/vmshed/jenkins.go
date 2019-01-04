@@ -46,7 +46,8 @@ func NewJenkinsMust(workspacePath string) *Jenkins {
 }
 
 // IsActive returnes true if a workspace path is set, otherwise false.
-func (j *Jenkins) IsActive() bool { return j.wsPath != "" }
+func (j *Jenkins) Workspace() string { return j.wsPath }
+func (j *Jenkins) IsActive() bool    { return j.Workspace() != "" }
 
 func (j *Jenkins) createSubDir(subdir string) (string, error) {
 	if !j.IsActive() {

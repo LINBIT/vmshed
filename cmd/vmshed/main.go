@@ -200,10 +200,6 @@ func sshPing(ctx context.Context, res *testResult, controller vmInstance) error 
 	return nil
 }
 
-func unitName(vm vmInstance) string {
-	return fmt.Sprintf("LBTEST-vm-%d-%s", vm.nr, vm.CurrentUUID)
-}
-
 func ctxCancled(ctx context.Context) bool {
 	return ctx.Err() != nil
 }

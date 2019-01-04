@@ -18,14 +18,18 @@ type vmInstance struct {
 	vm
 }
 
+func (vm vmInstance) unitName() string {
+	return fmt.Sprintf("LBTEST-vm-%d-%s", vm.nr, vm.CurrentUUID)
+}
+
 // no parent ctx, we always (try) to do that
 // ch2vm has a lot of "intermediate state" (maybe too much). if we kill it "in the middle" we might for example end up with zfs leftovers
 // start and tear down are fast enough...
 func startVMs(test string, res *testResult, to testOption, controller vmInstance, testnodes ...vmInstance) error {
 	allVMs := []vmInstance{controller}
 	allVMs = append(allVMs, testnodes...)
-	for _, n := range allVMs {
-		unitName := unitName(n)
+	for _, vm := range allVMs {
+		unitName := vm.unitName()
 
 		// clean up, should not be neccessary, but hey...
 		argv := []string{"systemctl", "reset-failed", unitName + ".scope"}
@@ -34,7 +38,7 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 		exec.Command(argv[0], argv[1:]...).Run()
 
 		payloads := "sshd;shell"
-		if n.nr != controller.nr {
+		if vm.nr != controller.nr {
 			op := payloads
 			pool := "lvm"
 			if to.needsZFS {
@@ -47,12 +51,12 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 			payloads += op
 		}
 		argv = []string{"systemd-run", "--unit=" + unitName, "--scope",
-			"./ch2vm.sh", "-s", *testSuite, "-d", n.Distribution, "-k", n.Kernel,
-			"--uuid", n.CurrentUUID,
-			"-v", fmt.Sprintf("%d", n.nr), "-p", payloads}
+			"./ch2vm.sh", "-s", *testSuite, "-d", vm.Distribution, "-k", vm.Kernel,
+			"--uuid", vm.CurrentUUID,
+			"-v", fmt.Sprintf("%d", vm.nr), "-p", payloads}
 
 		if jenkins.IsActive() {
-			jdir := filepath.Join(*jenkinsWS, "log", fmt.Sprintf("%s-%d", test, len(allVMs)-1))
+			jdir := filepath.Join(jenkins.Workspace(), "log", fmt.Sprintf("%s-%d", test, len(allVMs)-1))
 			argv = append(argv, fmt.Sprintf("--jdir=%s", jdir))
 			argv = append(argv, fmt.Sprintf("--jtest=%s", test))
 		}
@@ -78,8 +82,8 @@ func shutdownVMs(res *testResult, controller vmInstance, testnodes ...vmInstance
 	allVMs := []vmInstance{controller}
 	allVMs = append(allVMs, testnodes...)
 
-	for _, n := range allVMs {
-		unitName := unitName(n)
+	for _, vm := range allVMs {
+		unitName := vm.unitName()
 
 		argv := []string{"systemctl", "stop", unitName + ".scope"}
 		res.AppendLog(*quiet, "EXECUTING: %s", argv)
