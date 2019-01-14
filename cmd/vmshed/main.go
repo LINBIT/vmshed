@@ -11,9 +11,11 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"time"
 
+	"github.com/LINBIT/lbtest/cmd/vmshed/config"
 	"github.com/nightlyone/lockfile"
 )
 
@@ -37,10 +39,17 @@ var (
 	testTimeout = flag.Duration("testtime", 5*time.Minute, "Timeout for a single test execution in a VM")
 	ctrlDist    = flag.String("ctrldist", "", "If this is set, use this distribution for the controller VM, needs ctrlkernel set")
 	ctrlKernel  = flag.String("ctrlkernel", "", "If this is set, use this kernel for the controller VM, needs ctrldist set")
+	version     = flag.Bool("version", false, "Print version and exit")
 )
 
 func main() {
 	flag.Parse()
+	prog := path.Base(os.Args[0])
+
+	if *version {
+		fmt.Println(prog, config.Version)
+		return
+	}
 
 	if *startVM <= 0 {
 		log.Fatal(cmdName, "-startvm has to be positive")
