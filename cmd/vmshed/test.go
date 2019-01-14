@@ -171,16 +171,18 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 				testLog := testRes.Log()
 				fmt.Print(&testLog)
 
-				inVM := testRes.InVM()
 				if jenkins.IsActive() {
+					inVM := testRes.InVM()
 					if err := jenkins.Log(testDirOut, "inVM.log", &inVM); err != nil {
 						errs.Append(err)
 					}
 
-					if err := jenkins.XMLLog("test-results", testOut, testRes, &inVM); err != nil {
+					xmllog := testRes.InVM()
+					if err := jenkins.XMLLog("test-results", testOut, testRes, &xmllog); err != nil {
 						errs.Append(err)
 					}
 				} else {
+					inVM := testRes.InVM()
 					fmt.Printf("In VM/Test log for %s\n", testOut)
 					fmt.Print(&inVM)
 				}
