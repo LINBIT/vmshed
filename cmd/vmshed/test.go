@@ -269,8 +269,17 @@ func execTest(ctx context.Context, test string, to testOption, vmPool chan<- vmI
 	default:
 		ts = "doesnotexist"
 	}
-	payload := fmt.Sprintf("%s:leader:tests=%s:undertest=%s",
-		ts, test, strings.Join(testvms, ","))
+
+	envPrefix := "LB_TEST_"
+	var env []string
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, envPrefix) {
+			env = append(env, strings.TrimPrefix(e, envPrefix))
+		}
+	}
+
+	payload := fmt.Sprintf("%s:leader:tests=%s:undertest=%s:env='%s'",
+		ts, test, strings.Join(testvms, ","), strings.Join(env, ","))
 	argv := []string{"ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
 		fmt.Sprintf("root@vm-%d", controller.nr), "/payloads/" + ts, payload}
 
