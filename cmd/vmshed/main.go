@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/LINBIT/lbtest/cmd/vmshed/config"
@@ -28,6 +29,7 @@ var (
 
 	vmSpec      = flag.String("vms", "vms.json", "File containing VM specification")
 	testSpec    = flag.String("tests", "tests.json", "File containing test specification")
+	toRun       = flag.String("torun", "all", "comma separated list of test names to execute ('all' is a reserved test name)")
 	testSuite   = flag.String("suite", "drbd9", "Test suite to start")
 	startVM     = flag.Int("startvm", 1, "Number of the first VM to start in parallel")
 	nrVMs       = flag.Int("nvms", 12, "Maximum number of VMs to start in parallel, starting at -startvm")
@@ -96,6 +98,24 @@ func main() {
 		} else if err != nil {
 			log.Fatal(err)
 		}
+
+		if *toRun != "all" && *toRun != "" { //filter tests
+			idx := 0
+			for _, tn := range test.Tests {
+				for _, vt := range strings.Split(*toRun, ",") {
+					if tn == vt {
+						test.Tests[idx] = tn
+						idx++
+					}
+				}
+			}
+			test.Tests = test.Tests[:idx]
+		}
+
+		if len(test.Tests) == 0 {
+			continue
+		}
+
 		tests = append(tests, test)
 	}
 
