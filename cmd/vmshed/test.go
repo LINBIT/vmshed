@@ -20,14 +20,16 @@ import (
 var systemdScope sync.WaitGroup // VM starts (via systemd Add(1), and defer a go routine that waits. Use this as a signal that all VMs terminated after every group of tests
 
 type testGroup struct {
-	VMs     int      `json:"vms"`
-	Tests   []string `json:"tests"`
-	SameVMs []string `json:"samevms"` // tests that need the same Distribution
-	NeedZFS []string `json:"needzfs"` // tests that need the zfs in their VM
+	VMs          int      `json:"vms"`
+	Tests        []string `json:"tests"`
+	SameVMs      []string `json:"samevms"`      // tests that need the same Distribution
+	NeedZFS      []string `json:"needzfs"`      // tests that need the zfs in their VM
+	NeedPostgres []string `json:"needpostgres"` // tests that need postgres in their VM
+	NeedMariaDB  []string `json:"needmariadb"`  // tests that need mariaDB in their VM
 }
 
 type testOption struct {
-	needsSameVMs, needsZFS bool
+	needsSameVMs, needsZFS, needsPostgres, needsMariaDB bool
 }
 
 type TestResulter interface {
@@ -123,6 +125,18 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 			for _, z := range testGrp.NeedZFS {
 				if z == t {
 					to.needsZFS = true
+					break
+				}
+			}
+			for _, m := range testGrp.NeedMariaDB {
+				if m == t {
+					to.needsMariaDB = true
+					break
+				}
+			}
+			for _, p := range testGrp.NeedPostgres {
+				if p == t {
+					to.needsPostgres = true
 					break
 				}
 			}
