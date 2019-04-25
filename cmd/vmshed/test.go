@@ -280,6 +280,8 @@ func execTest(ctx context.Context, test string, to testOption, vmPool chan<- vmI
 		ts = "d9ts"
 	case "linstor":
 		ts = "linstorts"
+	case "golinstor":
+		ts = "golinstorts"
 	default:
 		ts = "doesnotexist"
 	}

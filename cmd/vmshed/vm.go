@@ -45,7 +45,7 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 				pool = "zfs"
 			}
 			payloads = fmt.Sprintf("%s;networking;loaddrbd;", pool)
-			if *testSuite == "linstor" {
+			if *testSuite == "linstor" || *testSuite == "golinstor" {
 				payloads += "linstor:combined;"
 				if to.needsPostgres {
 					payloads += "db:postgres;"
