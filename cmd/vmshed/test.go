@@ -274,9 +274,9 @@ func execTest(ctx context.Context, test string, to testOption, vmPool chan<- vmI
 		testvms = append(testvms, fmt.Sprintf("vm-%d", t.nr))
 	}
 
-	var ts string
+	var ts string // test (shell) script
 	switch *testSuite {
-	case "drbd9":
+	case "drbd9", "drbdproxy":
 		ts = "d9ts"
 	case "linstor":
 		ts = "linstorts"
@@ -295,7 +295,7 @@ func execTest(ctx context.Context, test string, to testOption, vmPool chan<- vmI
 	}
 
 	payload := fmt.Sprintf("%s:leader:tests=%s:undertest=%s:env='%s'",
-		ts, test, strings.Join(testvms, ","), strings.Join(env, ","))
+		*testSuite, test, strings.Join(testvms, ","), strings.Join(env, ","))
 	argv := []string{"ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
 		fmt.Sprintf("root@vm-%d", controller.nr), "/payloads/" + ts, payload}
 
