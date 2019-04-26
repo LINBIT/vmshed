@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	"math/big"
 	"os"
 	"os/exec"
 	"path"
@@ -124,7 +125,11 @@ func main() {
 	for i := 0; i < *nrVMs; i++ {
 		var vm vmInstance
 		vm.nr = i + *startVM
-		rndVM := vms[rand.Intn(len(vms))]
+		r, err := rand.Int(rand.Reader, big.NewInt(int64(len(vms))))
+		if err != nil {
+			log.Fatal(err)
+		}
+		rndVM := vms[r.Int64()]
 		vm.Distribution = rndVM.Distribution
 		vm.Kernel = rndVM.Kernel
 		vm.HasZFS = rndVM.HasZFS
@@ -189,7 +194,11 @@ func finalVMs(to testOption, origController vmInstance, origTestnodes ...vmInsta
 		}
 	} else if to.needsZFS {
 		for i := range testnodes {
-			zfsNode := zfsVMs[rand.Int31n(int32(len(zfsVMs)))]
+			r, err := rand.Int(rand.Reader, big.NewInt(int64(len(zfsVMs))))
+			if err != nil {
+				log.Fatal(err)
+			}
+			zfsNode := zfsVMs[r.Int64()]
 			testnodes[i].Distribution = zfsNode.Distribution
 			testnodes[i].Kernel = zfsNode.Kernel
 			testnodes[i].HasZFS = zfsNode.HasZFS
