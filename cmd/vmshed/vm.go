@@ -53,6 +53,8 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 				if to.needsMariaDB {
 					payloads += "db:mariadb;"
 				}
+			} else if *testSuite == "drbdproxy" {
+				payloads += "drbdproxy;"
 			}
 			payloads += op
 		}
