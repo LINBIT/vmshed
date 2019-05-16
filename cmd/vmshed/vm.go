@@ -40,7 +40,7 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 		payloads := "sshd;shell"
 		if vm.nr != controller.nr {
 			op := payloads
-			pool := "lvm"
+			pool := "lvm:thinpercent=20"
 			if to.needsZFS {
 				pool = "zfs"
 			}
