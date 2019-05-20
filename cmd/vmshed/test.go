@@ -152,7 +152,7 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 			}
 
 			testGrpWG.Add(1)
-			go func(st string, to testOption, controler vmInstance, testnodes ...vmInstance) {
+			go func(st string, to testOption, controller vmInstance, testnodes ...vmInstance) {
 				defer testGrpWG.Done()
 
 				stTest := time.Now()
