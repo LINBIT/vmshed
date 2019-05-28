@@ -22,6 +22,7 @@ import (
 )
 
 var zfsVMs []vm
+var allVMs []vm
 
 var jenkins *Jenkins
 
@@ -70,7 +71,6 @@ func main() {
 
 	dec := json.NewDecoder(vmFile)
 
-	var vms []vm
 	for {
 		var vm vm
 		if err := dec.Decode(&vm); err == io.EOF {
@@ -78,7 +78,7 @@ func main() {
 		} else if err != nil {
 			log.Fatal(err)
 		}
-		vms = append(vms, vm)
+		allVMs = append(allVMs, vm)
 		if vm.HasZFS {
 			zfsVMs = append(zfsVMs, vm)
 		}
@@ -125,11 +125,11 @@ func main() {
 	for i := 0; i < *nrVMs; i++ {
 		var vm vmInstance
 		vm.nr = i + *startVM
-		r, err := rand.Int(rand.Reader, big.NewInt(int64(len(vms))))
+		r, err := rand.Int(rand.Reader, big.NewInt(int64(len(allVMs))))
 		if err != nil {
 			log.Fatal(err)
 		}
-		rndVM := vms[r.Int64()]
+		rndVM := allVMs[r.Int64()]
 		vm.Distribution = rndVM.Distribution
 		vm.Kernel = rndVM.Kernel
 		vm.HasZFS = rndVM.HasZFS
@@ -181,7 +181,7 @@ func finalVMs(to testOption, origController vmInstance, origTestnodes ...vmInsta
 		}
 	}
 
-	if to.needsSameVMs {
+	if to.needsSameVMs { // sameVMs includes the controller
 		if to.needsZFS {
 			if !controller.HasZFS {
 				return controller, testnodes, fmt.Errorf("Controller node (%s:%s) does not have ZFS support", controller.Distribution, controller.Kernel)
@@ -191,6 +191,18 @@ func finalVMs(to testOption, origController vmInstance, origTestnodes ...vmInsta
 			testnodes[i].Distribution = controller.Distribution
 			testnodes[i].Kernel = controller.Kernel
 			testnodes[i].HasZFS = controller.HasZFS
+		}
+	} else if to.needsAllPlatforms { // this only includes the nodes under test
+		oneVM := allVMs[to.platformIdx]
+		if to.needsZFS {
+			if !oneVM.HasZFS {
+				return controller, testnodes, fmt.Errorf("One selected node (%s:%s) does not have ZFS support", oneVM.Distribution, oneVM.Kernel)
+			}
+		}
+		for i := range testnodes {
+			testnodes[i].Distribution = oneVM.Distribution
+			testnodes[i].Kernel = oneVM.Kernel
+			testnodes[i].HasZFS = oneVM.HasZFS
 		}
 	} else if to.needsZFS {
 		for i := range testnodes {

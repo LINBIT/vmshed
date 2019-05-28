@@ -20,16 +20,18 @@ import (
 var systemdScope sync.WaitGroup // VM starts (via systemd Add(1), and defer a go routine that waits. Use this as a signal that all VMs terminated after every group of tests
 
 type testGroup struct {
-	VMs          int      `json:"vms"`
-	Tests        []string `json:"tests"`
-	SameVMs      []string `json:"samevms"`      // tests that need the same Distribution
-	NeedZFS      []string `json:"needzfs"`      // tests that need the zfs in their VM
-	NeedPostgres []string `json:"needpostgres"` // tests that need postgres in their VM
-	NeedMariaDB  []string `json:"needmariadb"`  // tests that need mariaDB in their VM
+	NrVMs            int      `json:"vms"`
+	Tests            []string `json:"tests"`
+	SameVMs          []string `json:"samevms"`          // tests that need the same Distribution
+	NeedZFS          []string `json:"needzfs"`          // tests that need the zfs in their VM
+	NeedPostgres     []string `json:"needpostgres"`     // tests that need postgres in their VM
+	NeedMariaDB      []string `json:"needmariadb"`      // tests that need mariaDB in their VM
+	NeedAllPlatforms []string `json:"needallplatforms"` // tests that need to run on all platforms
 }
 
 type testOption struct {
-	needsSameVMs, needsZFS, needsPostgres, needsMariaDB bool
+	needsSameVMs, needsZFS, needsPostgres, needsMariaDB, needsAllPlatforms bool
+	platformIdx                                                            int
 }
 
 type TestResulter interface {
@@ -107,14 +109,30 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 	var overallFailed int
 	var testLogLock sync.Mutex // tests run in parallel, but we want the result blocks/logs somehow serialized.
 	for _, testGrp := range tests {
-		if testGrp.VMs+1 > nrVMs { // +1 for the coordinator
-			return 1, fmt.Errorf("This test group requires %d VMs (and a controller), but we only have %d VMs overall", testGrp.VMs, nrVMs)
+		if testGrp.NrVMs+1 > nrVMs { // +1 for the coordinator
+			return 1, fmt.Errorf("This test group requires %d VMs (and a controller), but we only have %d VMs overall", testGrp.NrVMs, nrVMs)
+		}
+
+		allPlatforms := make(map[string]int)
+		var allTests []string
+
+		// multiplicate tests that need to run for all platforms
+		for _, t := range testGrp.Tests {
+			allTests = append(allTests, t)
+			for _, a := range testGrp.NeedAllPlatforms {
+				if a == t {
+					for i := 0; i < len(allVMs)-1; i++ {
+						allTests = append(allTests, t)
+					}
+					break
+				}
+			}
 		}
 
 		errs := errorlog.NewErrorLog()
 		var testGrpWG sync.WaitGroup
 		start := time.Now()
-		for _, t := range testGrp.Tests {
+		for _, t := range allTests {
 			var to testOption
 			for _, s := range testGrp.SameVMs {
 				if s == t {
@@ -140,10 +158,19 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 					break
 				}
 			}
+			for _, a := range testGrp.NeedAllPlatforms {
+				if a == t {
+					to.needsAllPlatforms = true
+					break
+				}
+			}
+
+			to.platformIdx = allPlatforms[t]
+			allPlatforms[t]++
 
 			controller := <-vmPool
 			var vms []vmInstance
-			for i := 0; i < testGrp.VMs; i++ {
+			for i := 0; i < testGrp.NrVMs; i++ {
 				vms = append(vms, <-vmPool)
 			}
 
@@ -165,7 +192,7 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 					}
 				}
 				testRes.execTime = time.Since(stTest)
-				testOut := fmt.Sprintf("%s-%d", st, testGrp.VMs)
+				testOut := fmt.Sprintf("%s-%d-%d", st, testGrp.NrVMs, to.platformIdx)
 				testDirOut := "log/" + testOut
 				testRes.AppendLog(*quiet, "EXECUTIONTIME: %s, %v", testOut, testRes.execTime)
 
@@ -206,12 +233,12 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 		}
 		testGrpWG.Wait()
 		systemdScope.Wait()
-		log.Println(cmdName, "Group:", testGrp.VMs, "EXECUTIONTIME for Group:", testGrp.VMs, time.Since(start))
+		log.Println(cmdName, "Group:", testGrp.NrVMs, "EXECUTIONTIME for Group:", testGrp.NrVMs, time.Since(start))
 
 		nErrs := errs.Len()
 		if nErrs > 0 {
 			overallFailed += nErrs
-			log.Println("ERROR: Printing erros for Group:", testGrp.VMs)
+			log.Println("ERROR: Printing erros for Group:", testGrp.NrVMs)
 			for _, err := range errs.Errs() {
 				log.Println(cmdName, err)
 			}
@@ -247,7 +274,7 @@ func execTest(ctx context.Context, test string, to testOption, vmPool chan<- vmI
 	}
 
 	// always also print the header
-	testInstance := fmt.Sprintf("%s-%d", test, len(testnodes))
+	testInstance := fmt.Sprintf("%s-%d-%d", test, len(testnodes), to.platformIdx)
 	res.AppendLog(false, "EXECUTING: %s in %+v Nodes(%+v)", testInstance, controller, testnodes)
 
 	// Start VMs
