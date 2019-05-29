@@ -133,6 +133,10 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 		var testGrpWG sync.WaitGroup
 		start := time.Now()
 		for _, t := range allTests {
+			if *failTest && errs.Len() > 0 {
+				break
+			}
+
 			var to testOption
 			for _, s := range testGrp.SameVMs {
 				if s == t {
@@ -172,10 +176,6 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 			var vms []vmInstance
 			for i := 0; i < testGrp.NrVMs; i++ {
 				vms = append(vms, <-vmPool)
-			}
-
-			if *failTest && errs.Len() > 0 {
-				break
 			}
 
 			testGrpWG.Add(1)
