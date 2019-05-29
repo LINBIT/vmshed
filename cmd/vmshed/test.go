@@ -108,6 +108,7 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 
 	var overallFailed int
 	var testLogLock sync.Mutex // tests run in parallel, but we want the result blocks/logs somehow serialized.
+	var testsWG sync.WaitGroup
 	for _, testGrp := range tests {
 		if testGrp.NrVMs+1 > nrVMs { // +1 for the coordinator
 			return 1, fmt.Errorf("This test group requires %d VMs (and a controller), but we only have %d VMs overall", testGrp.NrVMs, nrVMs)
@@ -130,7 +131,6 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 		}
 
 		errs := errorlog.NewErrorLog()
-		var testGrpWG sync.WaitGroup
 		start := time.Now()
 		for _, t := range allTests {
 			if *failTest && errs.Len() > 0 {
@@ -178,9 +178,9 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 				vms = append(vms, <-vmPool)
 			}
 
-			testGrpWG.Add(1)
+			testsWG.Add(1)
 			go func(st string, to testOption, controller vmInstance, testnodes ...vmInstance) {
-				defer testGrpWG.Done()
+				defer testsWG.Done()
 
 				stTest := time.Now()
 				testRes := execTest(ctx, st, to, vmPool, controller, testnodes...)
@@ -231,7 +231,7 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 			}(t, to, controller, vms...)
 
 		}
-		testGrpWG.Wait()
+		testsWG.Wait()
 		systemdScope.Wait()
 		log.Println(cmdName, "Group:", testGrp.NrVMs, "EXECUTIONTIME for Group:", testGrp.NrVMs, time.Since(start))
 
