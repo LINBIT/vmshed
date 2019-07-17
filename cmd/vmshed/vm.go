@@ -6,10 +6,39 @@ import (
 	"path/filepath"
 )
 
+type vmcap uint
+
+const (
+	zfs vmcap = 1 << iota
+	mariaDB
+	postgres
+)
+
+func (c vmcap) isSet(tcap vmcap) bool {
+	return c&tcap != 0
+}
+
+func (req vmcap) fulfilledby(some vmcap) bool {
+	if (req & some) == req {
+		return true
+	}
+	return false
+}
+
 type vm struct {
 	Distribution string `json:"distribution"`
 	Kernel       string `json:"kernel"`
 	HasZFS       bool   `json:"zfs"`
+	HasMariaDB   bool   `json:"mariadb"`
+	HasPostgres  bool   `json:"postgres"`
+
+	vmcap vmcap
+}
+
+func (v vm) setHasByCap() {
+	v.HasZFS = v.vmcap.isSet(zfs)
+	v.HasMariaDB = v.vmcap.isSet(mariaDB)
+	v.HasPostgres = v.vmcap.isSet(postgres)
 }
 
 type vmInstance struct {

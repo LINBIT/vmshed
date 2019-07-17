@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -21,7 +20,6 @@ import (
 	"github.com/nightlyone/lockfile"
 )
 
-var zfsVMs []vm
 var allVMs []vm
 
 var jenkins *Jenkins
@@ -78,10 +76,18 @@ func main() {
 		} else if err != nil {
 			log.Fatal(err)
 		}
-		allVMs = append(allVMs, vm)
+
 		if vm.HasZFS {
-			zfsVMs = append(zfsVMs, vm)
+			vm.vmcap |= zfs
 		}
+		if vm.HasMariaDB {
+			vm.vmcap |= mariaDB
+		}
+		if vm.HasPostgres {
+			vm.vmcap |= postgres
+		}
+
+		allVMs = append(allVMs, vm)
 	}
 
 	testFile, err := os.Open(*testSpec)
@@ -132,7 +138,7 @@ func main() {
 		rndVM := allVMs[r.Int64()]
 		vm.Distribution = rndVM.Distribution
 		vm.Kernel = rndVM.Kernel
-		vm.HasZFS = rndVM.HasZFS
+		vm.vmcap = rndVM.vmcap
 
 		vmPool <- vm
 
@@ -166,55 +172,72 @@ func finalVMs(to testOption, origController vmInstance, origTestnodes ...vmInsta
 	controller := origController
 	testnodes := origTestnodes
 
-	if to.needsZFS && len(zfsVMs) == 0 {
-		return controller, testnodes, errors.New("You required ZFS, but none of your test VMs supports it")
+	var reqVMCaps vmcap
+	if to.needsZFS {
+		reqVMCaps |= zfs
+	}
+	if to.needsMariaDB {
+		reqVMCaps |= mariaDB
+	}
+	if to.needsPostgres {
+		reqVMCaps |= postgres
 	}
 
 	if *ctrlDist != "" && *ctrlKernel != "" {
 		controller.Distribution = *ctrlDist
 		controller.Kernel = *ctrlKernel
-	}
-	for _, n := range zfsVMs {
-		if controller.Distribution == n.Distribution && controller.Kernel == n.Kernel {
-			controller.HasZFS = true
-			break
+
+		for _, n := range allVMs {
+			if controller.Distribution == n.Distribution && controller.Kernel == n.Kernel {
+				controller.vmcap = n.vmcap
+				break
+			}
 		}
 	}
 
 	if to.needsSameVMs { // sameVMs includes the controller
-		if to.needsZFS {
-			if !controller.HasZFS {
-				return controller, testnodes, fmt.Errorf("Controller node (%s:%s) does not have ZFS support", controller.Distribution, controller.Kernel)
-			}
+		if !reqVMCaps.fulfilledby(controller.vmcap) {
+			return controller, testnodes, fmt.Errorf("Controller node (%s:%s) does not support all required properties", controller.Distribution, controller.Kernel)
 		}
 		for i := range testnodes {
 			testnodes[i].Distribution = controller.Distribution
 			testnodes[i].Kernel = controller.Kernel
-			testnodes[i].HasZFS = controller.HasZFS
+			testnodes[i].vmcap = controller.vmcap
 		}
 	} else if to.needsAllPlatforms { // this only includes the nodes under test
 		oneVM := allVMs[to.platformIdx]
-		if to.needsZFS {
-			if !oneVM.HasZFS {
-				return controller, testnodes, fmt.Errorf("One selected node (%s:%s) does not have ZFS support", oneVM.Distribution, oneVM.Kernel)
-			}
+		if !reqVMCaps.fulfilledby(controller.vmcap) {
+			return controller, testnodes, fmt.Errorf("One selected node (%s:%s) does not have all required caps support", oneVM.Distribution, oneVM.Kernel)
 		}
 		for i := range testnodes {
 			testnodes[i].Distribution = oneVM.Distribution
 			testnodes[i].Kernel = oneVM.Kernel
-			testnodes[i].HasZFS = oneVM.HasZFS
+			testnodes[i].vmcap = oneVM.vmcap
 		}
-	} else if to.needsZFS {
+	} else if reqVMCaps != 0 { // find matching VMs.
+		capVMs := make([]vm, 0, len(testnodes))
+
+		for i := range allVMs {
+			if reqVMCaps.fulfilledby(allVMs[i].vmcap) {
+				capVMs = append(capVMs, allVMs[i])
+			}
+		}
+
 		for i := range testnodes {
-			r, err := rand.Int(rand.Reader, big.NewInt(int64(len(zfsVMs))))
+			r, err := rand.Int(rand.Reader, big.NewInt(int64(len(capVMs))))
 			if err != nil {
 				log.Fatal(err)
 			}
-			zfsNode := zfsVMs[r.Int64()]
-			testnodes[i].Distribution = zfsNode.Distribution
-			testnodes[i].Kernel = zfsNode.Kernel
-			testnodes[i].HasZFS = zfsNode.HasZFS
+			selNode := capVMs[r.Int64()]
+			testnodes[i].Distribution = selNode.Distribution
+			testnodes[i].Kernel = selNode.Kernel
+			testnodes[i].vmcap = selNode.vmcap
 		}
+	}
+
+	controller.vm.setHasByCap()
+	for i := range testnodes {
+		testnodes[i].vm.setHasByCap()
 	}
 
 	return controller, testnodes, nil
