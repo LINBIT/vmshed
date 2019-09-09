@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 )
@@ -54,6 +55,10 @@ func (vm vmInstance) unitName() string {
 	return fmt.Sprintf("LBTEST-vm-%d-%s", vm.nr, vm.CurrentUUID)
 }
 
+func testIdString(test string, needsETCd bool, vmCount int, platformIdx int) string {
+	return fmt.Sprintf("%s-etc-%t-%d-%d", test, needsETCd, vmCount, platformIdx)
+}
+
 // no parent ctx, we always (try) to do that
 // ch2vm has a lot of "intermediate state" (maybe too much). if we kill it "in the middle" we might for example end up with zfs leftovers
 // start and tear down are fast enough...
@@ -102,16 +107,33 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 			"--uuid", vm.CurrentUUID,
 			"-v", fmt.Sprintf("%d", vm.nr), "-p", payloads}
 
+		var stdout *os.File
+		var stderr *os.File
 		if jenkins.IsActive() {
-			jetcd := fmt.Sprintf("etc-%t", to.needsETCd)
-			jdir := filepath.Join(jenkins.Workspace(), "log",
-				fmt.Sprintf("%s-%s-%d-%d", test, jetcd, len(allVMs)-1, to.platformIdx))
+			testOut := testIdString(test, to.needsETCd, len(allVMs) - 1, to.platformIdx)
+			jdir := jenkins.LogDir(testOut)
 			argv = append(argv, fmt.Sprintf("--jdir=%s", jdir))
 			argv = append(argv, fmt.Sprintf("--jtest=%s", test))
+
+			vmOutDir := filepath.Join("log", testOut, "outsideVM")
+
+			var err error
+			stdout, err = jenkins.CreateFile(vmOutDir, fmt.Sprintf("vm-%d-stdout.log", vm.nr));
+			if err != nil {
+				return err
+			}
+
+			stderr, err = jenkins.CreateFile(vmOutDir, fmt.Sprintf("vm-%d-stderr.log", vm.nr));
+			if err != nil {
+				return err
+			}
 		}
 
 		res.AppendLog(*quiet, "EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
+		cmd.Stdout = stdout
+		cmd.Stderr = stderr
+
 		if err := cmd.Start(); err != nil {
 			return err
 		}

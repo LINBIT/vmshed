@@ -62,9 +62,22 @@ func (j *Jenkins) createSubDir(subdir string) (string, error) {
 	return p, os.MkdirAll(p, 0755)
 }
 
-// Log writes an arbitrary log file, where "test" is a subdirectory in the Jenkins workspace, and "name" is the name of the file to write to.
-func (j *Jenkins) Log(test, name string, r io.Reader) error {
-	p, err := j.createSubDir(test)
+func (j *Jenkins) LogDir(testIdString string) string {
+	return filepath.Join(j.Workspace(), "log", testIdString)
+}
+
+func (j *Jenkins) CreateFile(subDir string, name string) (*os.File, error) {
+	p, err := j.createSubDir(subDir)
+	if err != nil {
+		return nil, err
+	}
+
+	return os.Create(filepath.Join(p, name))
+}
+
+// Log writes an arbitrary log file, where "subDir" is a subdirectory in the Jenkins workspace, and "name" is the name of the file to write to.
+func (j *Jenkins) Log(subDir, name string, r io.Reader) error {
+	p, err := j.createSubDir(subDir)
 	if err != nil {
 		return err
 	}

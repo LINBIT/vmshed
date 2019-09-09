@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -200,9 +201,8 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 					}
 				}
 				testRes.execTime = time.Since(stTest)
-				jetcd := fmt.Sprintf("etc-%t", to.needsETCd)
-				testOut := fmt.Sprintf("%s-%s-%d-%d", st, jetcd, testGrp.NrVMs, to.platformIdx)
-				testDirOut := "log/" + testOut
+				testOut := testIdString(st, to.needsETCd, testGrp.NrVMs, to.platformIdx)
+				testDirOut := filepath.Join("log", testOut)
 				testRes.AppendLog(*quiet, "EXECUTIONTIME: %s, %v", testOut, testRes.execTime)
 
 				testLogLock.Lock()
