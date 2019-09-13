@@ -12,6 +12,7 @@ const (
 	zfs vmcap = 1 << iota
 	mariaDB
 	postgres
+	etcd
 )
 
 func (c vmcap) isSet(tcap vmcap) bool {
@@ -31,6 +32,7 @@ type vm struct {
 	HasZFS       bool   `json:"zfs"`
 	HasMariaDB   bool   `json:"mariadb"`
 	HasPostgres  bool   `json:"postgres"`
+	HasETCd      bool   `json:"etcd"`
 
 	vmcap vmcap
 }
@@ -39,6 +41,7 @@ func (v vm) setHasByCap() {
 	v.HasZFS = v.vmcap.isSet(zfs)
 	v.HasMariaDB = v.vmcap.isSet(mariaDB)
 	v.HasPostgres = v.vmcap.isSet(postgres)
+	v.HasETCd = v.vmcap.isSet(etcd)
 }
 
 type vmInstance struct {
@@ -75,12 +78,19 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 			}
 			payloads = fmt.Sprintf("%s;networking;loaddrbd;", pool)
 			if *testSuite == "linstor" || *testSuite == "golinstor" {
-				payloads += "linstor:combined;"
+				var lsetcd string
+				if to.needsETCd {
+					lsetcd = ":etcd"
+				}
+				payloads += fmt.Sprintf("linstor:combined%s;", lsetcd)
 				if to.needsPostgres {
 					payloads += "db:postgres;"
 				}
 				if to.needsMariaDB {
 					payloads += "db:mariadb;"
+				}
+				if to.needsETCd {
+					payloads += "db:etcd;"
 				}
 			} else if *testSuite == "drbdproxy" {
 				payloads += "drbdproxy;"
@@ -93,8 +103,9 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 			"-v", fmt.Sprintf("%d", vm.nr), "-p", payloads}
 
 		if jenkins.IsActive() {
+			jetcd := fmt.Sprintf("etc-%t", to.needsETCd)
 			jdir := filepath.Join(jenkins.Workspace(), "log",
-				fmt.Sprintf("%s-%d-%d", test, len(allVMs)-1, to.platformIdx))
+				fmt.Sprintf("%s-%s-%d-%d", test, jetcd, len(allVMs)-1, to.platformIdx))
 			argv = append(argv, fmt.Sprintf("--jdir=%s", jdir))
 			argv = append(argv, fmt.Sprintf("--jtest=%s", test))
 		}

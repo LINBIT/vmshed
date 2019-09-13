@@ -86,6 +86,9 @@ func main() {
 		if vm.HasPostgres {
 			vm.vmcap |= postgres
 		}
+		if vm.HasETCd {
+			vm.vmcap |= etcd
+		}
 
 		allVMs = append(allVMs, vm)
 	}
@@ -181,6 +184,9 @@ func finalVMs(to testOption, origController vmInstance, origTestnodes ...vmInsta
 	}
 	if to.needsPostgres {
 		reqVMCaps |= postgres
+	}
+	if to.needsETCd {
+		reqVMCaps |= etcd
 	}
 
 	if *ctrlDist != "" && *ctrlKernel != "" {

@@ -26,12 +26,14 @@ type testGroup struct {
 	NeedZFS          []string `json:"needzfs"`          // tests that need the zfs in their VM
 	NeedPostgres     []string `json:"needpostgres"`     // tests that need postgres in their VM
 	NeedMariaDB      []string `json:"needmariadb"`      // tests that need mariaDB in their VM
+	NeedETCd         []string `json:"needetcd"`         // tests that need mariaDB in their VM
 	NeedAllPlatforms []string `json:"needallplatforms"` // tests that need to run on all platforms
 }
 
 type testOption struct {
-	needsSameVMs, needsZFS, needsPostgres, needsMariaDB, needsAllPlatforms bool
-	platformIdx                                                            int
+	needsSameVMs, needsZFS, needsAllPlatforms bool
+	needsPostgres, needsMariaDB, needsETCd    bool
+	platformIdx                               int
 }
 
 type TestResulter interface {
@@ -162,6 +164,12 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 					break
 				}
 			}
+			for _, p := range testGrp.NeedETCd {
+				if p == t {
+					to.needsETCd = true
+					break
+				}
+			}
 			for _, a := range testGrp.NeedAllPlatforms {
 				if a == t {
 					to.needsAllPlatforms = true
@@ -192,7 +200,8 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 					}
 				}
 				testRes.execTime = time.Since(stTest)
-				testOut := fmt.Sprintf("%s-%d-%d", st, testGrp.NrVMs, to.platformIdx)
+				jetcd := fmt.Sprintf("etc-%t", to.needsETCd)
+				testOut := fmt.Sprintf("%s-%s-%d-%d", st, jetcd, testGrp.NrVMs, to.platformIdx)
 				testDirOut := "log/" + testOut
 				testRes.AppendLog(*quiet, "EXECUTIONTIME: %s, %v", testOut, testRes.execTime)
 
@@ -320,6 +329,8 @@ func execTest(ctx context.Context, test string, to testOption, vmPool chan<- vmI
 			env = append(env, strings.TrimPrefix(e, envPrefix))
 		}
 	}
+
+	env = append(env, fmt.Sprintf("ETCD=%t", to.needsETCd))
 
 	payload := fmt.Sprintf("%s:leader:tests=%s:undertest=%s:env='%s'",
 		*testSuite, test, strings.Join(testvms, ","), strings.Join(env, ","))
