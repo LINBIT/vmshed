@@ -118,12 +118,12 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 			vmOutDir := filepath.Join("log", testOut, "outsideVM")
 
 			var err error
-			stdout, err = jenkins.CreateFile(vmOutDir, fmt.Sprintf("vm-%d-stdout.log", vm.nr));
+			stdout, err = jenkins.CreateFile(vmOutDir, fmt.Sprintf("vm-%d-stdout.log", vm.nr))
 			if err != nil {
 				return err
 			}
 
-			stderr, err = jenkins.CreateFile(vmOutDir, fmt.Sprintf("vm-%d-stderr.log", vm.nr));
+			stderr, err = jenkins.CreateFile(vmOutDir, fmt.Sprintf("vm-%d-stderr.log", vm.nr))
 			if err != nil {
 				return err
 			}
