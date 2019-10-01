@@ -110,7 +110,7 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 		var stdout *os.File
 		var stderr *os.File
 		if jenkins.IsActive() {
-			testOut := testIdString(test, to.needsETCd, len(allVMs) - 1, to.platformIdx)
+			testOut := testIdString(test, to.needsETCd, len(allVMs)-1, to.platformIdx)
 			jdir := jenkins.LogDir(testOut)
 			argv = append(argv, fmt.Sprintf("--jdir=%s", jdir))
 			argv = append(argv, fmt.Sprintf("--jtest=%s", test))
