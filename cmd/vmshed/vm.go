@@ -56,7 +56,7 @@ func (vm vmInstance) unitName() string {
 }
 
 func testIdString(test string, needsETCd bool, vmCount int, platformIdx int) string {
-	return fmt.Sprintf("%s-etc-%t-%d-%d", test, needsETCd, vmCount, platformIdx)
+	return fmt.Sprintf("%s-etcd-%t-%d-%d", test, needsETCd, vmCount, platformIdx)
 }
 
 // no parent ctx, we always (try) to do that
