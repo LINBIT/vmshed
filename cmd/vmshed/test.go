@@ -28,12 +28,14 @@ type testGroup struct {
 	NeedPostgres     []string `json:"needpostgres"`     // tests that need postgres in their VM
 	NeedMariaDB      []string `json:"needmariadb"`      // tests that need mariaDB in their VM
 	NeedETCd         []string `json:"needetcd"`         // tests that need mariaDB in their VM
+	NeedTCRate       []string `json:"needtcrate"`       // tests that need tc rate in their VM
 	NeedAllPlatforms []string `json:"needallplatforms"` // tests that need to run on all platforms
 }
 
 type testOption struct {
 	needsSameVMs, needsZFS, needsAllPlatforms bool
 	needsPostgres, needsMariaDB, needsETCd    bool
+	needsTCRate                               bool
 	platformIdx                               int
 }
 
@@ -168,6 +170,12 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 			for _, p := range testGrp.NeedETCd {
 				if p == t {
 					to.needsETCd = true
+					break
+				}
+			}
+			for _, p := range testGrp.NeedTCRate {
+				if p == t {
+					to.needsTCRate = true
 					break
 				}
 			}

@@ -14,6 +14,7 @@ const (
 	mariaDB
 	postgres
 	etcd
+	tcrate
 )
 
 func (c vmcap) isSet(tcap vmcap) bool {
@@ -34,6 +35,7 @@ type vm struct {
 	HasMariaDB   bool   `json:"mariadb"`
 	HasPostgres  bool   `json:"postgres"`
 	HasETCd      bool   `json:"etcd"`
+	HasTCRate    bool   `json:"tcrate"`
 
 	vmcap vmcap
 }

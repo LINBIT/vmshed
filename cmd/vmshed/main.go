@@ -89,6 +89,9 @@ func main() {
 		if vm.HasETCd {
 			vm.vmcap |= etcd
 		}
+		if vm.HasTCRate {
+			vm.vmcap |= tcrate
+		}
 
 		allVMs = append(allVMs, vm)
 	}
@@ -187,6 +190,9 @@ func finalVMs(to testOption, origController vmInstance, origTestnodes ...vmInsta
 	}
 	if to.needsETCd {
 		reqVMCaps |= etcd
+	}
+	if to.needsTCRate {
+		reqVMCaps |= tcrate
 	}
 
 	if *ctrlDist != "" && *ctrlKernel != "" {
