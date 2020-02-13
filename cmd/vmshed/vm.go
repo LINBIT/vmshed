@@ -76,13 +76,23 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 		// we don't care for the outcome, in be best case it helped, otherwise start will fail
 		exec.Command(argv[0], argv[1:]...).Run()
 
+		mem := "768M"
 		payloads := "sshd;shell"
 		if vm.nr != controller.nr {
 			op := payloads
-			pool := "lvm:thinpercent=20"
+
+			pool := "lvm"
+			if *testSuite != "linstor" {
+				pool += ":thinpercent=20"
+			}
 			if to.needsZFS {
 				pool = "zfs"
 			}
+			if *testSuite == "linstor" {
+				pool += ":ramdisk=1G"
+				mem = "2G"
+			}
+
 			payloads = fmt.Sprintf("%s;networking;loaddrbd;", pool)
 			if *testSuite == "linstor" || *testSuite == "golinstor" {
 				var lsetcd string
@@ -106,6 +116,7 @@ func startVMs(test string, res *testResult, to testOption, controller vmInstance
 		}
 		argv = []string{"systemd-run", "--unit=" + unitName, "--scope",
 			"./ch2vm.sh", "-s", *testSuite, "-d", vm.Distribution, "-k", vm.Kernel,
+			"-m", mem,
 			"--uuid", vm.CurrentUUID,
 			"-v", fmt.Sprintf("%d", vm.nr), "-p", payloads}
 

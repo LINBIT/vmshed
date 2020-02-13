@@ -285,9 +285,9 @@ func execTest(ctx context.Context, test string, to testOption, vmPool chan<- vmI
 	}
 
 	// set uuids
-	controller.CurrentUUID = uuid.Must(uuid.NewV4()).String()
+	controller.CurrentUUID = uuid.NewV4().String()
 	for i := 0; i < len(testnodes); i++ {
-		testnodes[i].CurrentUUID = uuid.Must(uuid.NewV4()).String()
+		testnodes[i].CurrentUUID = uuid.NewV4().String()
 	}
 
 	// always also print the header
