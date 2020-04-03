@@ -1,2 +1,0 @@
-{ "distribution":"rhel7.0",       "kernel": "3.10.0-693.17.1.el7" }
-{ "distribution":"ubuntu-xenial", "kernel": "4.4.0-112" }

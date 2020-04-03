@@ -1,0 +1,10 @@
+[[steps]]
+[steps.shell]
+script = """
+if [ ! -e /provision-file ]; then
+	echo "File not found"
+	exit 1
+fi
+echo "File found"
+cat /provision-file
+"""

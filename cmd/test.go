@@ -3,40 +3,31 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/rck/errorlog"
-	uuid "github.com/satori/go.uuid"
 )
 
-// TODO(rck): rm, this is nasty
-var systemdScope sync.WaitGroup // VM starts (via systemd Add(1), and defer a go routine that waits. Use this as a signal that all VMs terminated after every group of tests
-
 type testGroup struct {
-	NrVMs            int      `json:"vms"`
-	Tests            []string `json:"tests"`
-	SameVMs          []string `json:"samevms"`          // tests that need the same Distribution
-	NeedZFS          []string `json:"needzfs"`          // tests that need the zfs in their VM
-	NeedPostgres     []string `json:"needpostgres"`     // tests that need postgres in their VM
-	NeedMariaDB      []string `json:"needmariadb"`      // tests that need mariaDB in their VM
-	NeedETCd         []string `json:"needetcd"`         // tests that need mariaDB in their VM
-	NeedTCRate       []string `json:"needtcrate"`       // tests that need tc rate in their VM
-	NeedAllPlatforms []string `json:"needallplatforms"` // tests that need to run on all platforms
+	NrVMs            int      `toml:"vms"`
+	Tests            []string `toml:"tests"`
+	SameVMs          []string `toml:"samevms"`          // tests that need the same Distribution
+	NeedAllPlatforms []string `toml:"needallplatforms"` // tests that need to run on all platforms
 }
 
 type testOption struct {
-	needsSameVMs, needsZFS, needsAllPlatforms bool
-	needsPostgres, needsMariaDB, needsETCd    bool
-	needsTCRate                               bool
-	platformIdx                               int
+	needsSameVMs      bool
+	needsAllPlatforms bool
+	platformIdx       int
 }
 
 type TestResulter interface {
@@ -107,16 +98,16 @@ func (r *testResult) AppendInVM(quiet bool, format string, v ...interface{}) {
 	r.writeLog(r.inVMLogger, quiet, format, v...)
 }
 
-func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error) {
+func execTests(testSpec *testSpecification, nrVMs int, nrPool chan int) (int, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	var overallFailed int
 	var testLogLock sync.Mutex // tests run in parallel, but we want the result blocks/logs somehow serialized.
 	var testsWG sync.WaitGroup
-	for _, testGrp := range tests {
-		if testGrp.NrVMs+1 > nrVMs { // +1 for the coordinator
-			return 1, fmt.Errorf("This test group requires %d VMs (and a controller), but we only have %d VMs overall", testGrp.NrVMs, nrVMs)
+	for _, testGrp := range testSpec.TestGroups {
+		if testGrp.NrVMs > nrVMs {
+			return 1, fmt.Errorf("This test group requires %d VMs, but we only have %d VMs overall", testGrp.NrVMs, nrVMs)
 		}
 
 		allPlatforms := make(map[string]int)
@@ -127,7 +118,7 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 			allTests = append(allTests, t)
 			for _, a := range testGrp.NeedAllPlatforms {
 				if a == t {
-					for i := 0; i < len(allVMs)-1; i++ {
+					for i := 0; i < len(vmSpec.VMs)-1; i++ {
 						allTests = append(allTests, t)
 					}
 					break
@@ -149,36 +140,6 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 					break
 				}
 			}
-			for _, z := range testGrp.NeedZFS {
-				if z == t {
-					to.needsZFS = true
-					break
-				}
-			}
-			for _, m := range testGrp.NeedMariaDB {
-				if m == t {
-					to.needsMariaDB = true
-					break
-				}
-			}
-			for _, p := range testGrp.NeedPostgres {
-				if p == t {
-					to.needsPostgres = true
-					break
-				}
-			}
-			for _, p := range testGrp.NeedETCd {
-				if p == t {
-					to.needsETCd = true
-					break
-				}
-			}
-			for _, p := range testGrp.NeedTCRate {
-				if p == t {
-					to.needsTCRate = true
-					break
-				}
-			}
 			for _, a := range testGrp.NeedAllPlatforms {
 				if a == t {
 					to.needsAllPlatforms = true
@@ -189,18 +150,30 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 			to.platformIdx = allPlatforms[t]
 			allPlatforms[t]++
 
-			controller := <-vmPool
 			var vms []vmInstance
 			for i := 0; i < testGrp.NrVMs; i++ {
-				vms = append(vms, <-vmPool)
+				nr := <-nrPool
+				r, err := rand.Int(rand.Reader, big.NewInt(int64(len(vmSpec.VMs))))
+				if err != nil {
+					return 1, err
+				}
+				v := vmInstance{
+					ImageName: vmSpec.ImageName(vmSpec.VMs[r.Int64()]),
+					nr:        nr,
+				}
+				vms = append(vms, v)
+			}
+			vms, err := finalVMs(to, vms...)
+			if err != nil {
+				return 1, err
 			}
 
 			testsWG.Add(1)
-			go func(st string, to testOption, controller vmInstance, testnodes ...vmInstance) {
+			go func(st string, to testOption, testnodes ...vmInstance) {
 				defer testsWG.Done()
 
 				stTest := time.Now()
-				testRes := execTest(ctx, st, to, vmPool, controller, testnodes...)
+				testRes := execTest(ctx, testSpec, st, to, nrPool, testnodes...)
 				if err := testRes.err; err != nil {
 					errs.Append(err)
 					if *failTest {
@@ -209,7 +182,7 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 					}
 				}
 				testRes.execTime = time.Since(stTest)
-				testOut := testIdString(st, to.needsETCd, testGrp.NrVMs, to.platformIdx)
+				testOut := testIdString(st, testGrp.NrVMs, to.platformIdx)
 				testDirOut := filepath.Join("log", testOut)
 				testRes.AppendLog(*quiet, "EXECUTIONTIME: %s, %v", testOut, testRes.execTime)
 
@@ -245,11 +218,10 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 					fmt.Print(&inVM)
 				}
 				fmt.Printf("END Results for %s\n", testOut)
-			}(t, to, controller, vms...)
+			}(t, to, vms...)
 
 		}
 		testsWG.Wait()
-		systemdScope.Wait()
 		log.Println(cmdName, "Group:", testGrp.NrVMs, "EXECUTIONTIME for Group:", testGrp.NrVMs, time.Since(start))
 
 		nErrs := errs.Len()
@@ -258,6 +230,9 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 			log.Println("ERROR: Printing erros for Group:", testGrp.NrVMs)
 			for _, err := range errs.Errs() {
 				log.Println(cmdName, err)
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					log.Print(string(exitErr.Stderr))
+				}
 			}
 			if *failGrp || *failTest {
 				return overallFailed, errors.New("At least one test in the test group failed, giving up early")
@@ -267,85 +242,37 @@ func execTests(tests []testGroup, nrVMs int, vmPool chan vmInstance) (int, error
 	return overallFailed, nil
 }
 
-func execTest(ctx context.Context, test string, to testOption, vmPool chan<- vmInstance, origController vmInstance, origTestnodes ...vmInstance) *testResult {
+func execTest(ctx context.Context, testSpec *testSpecification, test string, to testOption, nrPool chan<- int, testnodes ...vmInstance) *testResult {
 	res := newTestResult(cmdName)
 
 	// we always want to hand back the random VMS
 	defer func() {
-		vmPool <- origController
-		for _, vm := range origTestnodes {
-			vmPool <- vm
+		for _, vm := range testnodes {
+			nrPool <- vm.nr
 		}
 	}()
-	// but we might need to actually start different ones
-	controller, testnodes, err := finalVMs(to, origController, origTestnodes...)
-	if err != nil {
-		res.err = err
-		return res
-	}
-
-	// set uuids
-	controller.CurrentUUID = uuid.NewV4().String()
-	for i := 0; i < len(testnodes); i++ {
-		testnodes[i].CurrentUUID = uuid.NewV4().String()
-	}
 
 	// always also print the header
 	testInstance := fmt.Sprintf("%s-%d-%d", test, len(testnodes), to.platformIdx)
-	res.AppendLog(false, "EXECUTING: %s in %+v Nodes(%+v)", testInstance, controller, testnodes)
+	res.AppendLog(false, "EXECUTING: %s Nodes(%+v)", testInstance, testnodes)
 
 	// Start VMs
 	start := time.Now()
-	err = startVMs(test, res, to, controller, testnodes...)
-	defer shutdownVMs(res, controller, testnodes...)
+	err := startVMs(res, to, testnodes...)
+	defer shutdownVMs(res, testnodes...)
 	if err != nil {
 		res.err = err
 		return res
 	}
-	res.AppendLog(*quiet, "EXECUTIONTIME: Starting VM scopes: %v", time.Since(start))
+	res.AppendLog(*quiet, "EXECUTIONTIME: Starting VMs: %v", time.Since(start))
 
-	// SSH ping the controller. If the controller is ready, we are ready to go
-	// The controller itself then waits for the nodes under test (or gives up)
-	res.AppendLog(*quiet, "EXECUTING: SSH-pinging for %s", testInstance)
-	if err := sshPing(ctx, res, controller); err != nil {
-		res.err = err
-		return res
-	}
-	res.AppendLog(*quiet, "EXECUTIONTIME: SSH-pinging: %v", time.Since(start))
-
-	var testvms []string
-	for _, t := range testnodes {
-		testvms = append(testvms, fmt.Sprintf("vm-%d", t.nr))
+	argv := []string{"virter", "vm", "exec",
+		"--provision", testSpec.TestSuiteFile}
+	for _, vm := range testnodes {
+		argv = append(argv, vm.vmName())
 	}
 
-	var ts string // test (shell) script
-	switch *testSuite {
-	case "drbd9", "drbdproxy":
-		ts = "d9ts"
-	case "linstor":
-		ts = "linstorts"
-	case "golinstor":
-		ts = "golinstorts"
-	default:
-		ts = "doesnotexist"
-	}
-
-	envPrefix := "LB_TEST_"
-	var env []string
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, envPrefix) {
-			env = append(env, strings.TrimPrefix(e, envPrefix))
-		}
-	}
-
-	env = append(env, fmt.Sprintf("ETCD=%t", to.needsETCd))
-
-	payload := fmt.Sprintf("%s:leader:tests=%s:undertest=%s:env='%s'",
-		*testSuite, test, strings.Join(testvms, ","), strings.Join(env, ","))
-	argv := []string{"ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-		fmt.Sprintf("root@vm-%d", controller.nr), "/payloads/" + ts, payload}
-
-	res.AppendLog(*quiet, "EXECUTING the actual test via ssh: %s", argv)
+	res.AppendLog(*quiet, "EXECUTING the actual test: %s", argv)
 
 	start = time.Now()
 	ctx, cancel := context.WithTimeout(ctx, *testTimeout)

@@ -1,0 +1,7 @@
+test_suite_file = "example/test-run-execute.virter.toml"
+
+[[group]]
+vms = 2
+tests = [
+  "example_test",
+]

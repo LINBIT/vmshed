@@ -1,0 +1,5 @@
+[[steps]]
+[steps.shell]
+script = """
+echo "Text from provisioning step" > /provision-file
+"""

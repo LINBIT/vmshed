@@ -2,181 +2,152 @@ package cmd
 
 import (
 	"fmt"
-	"os"
+	"log"
 	"os/exec"
-	"path/filepath"
+	"strconv"
+	"sync"
 )
-
-type vmcap uint
-
-const (
-	zfs vmcap = 1 << iota
-	mariaDB
-	postgres
-	etcd
-	tcrate
-)
-
-func (c vmcap) isSet(tcap vmcap) bool {
-	return c&tcap != 0
-}
-
-func (req vmcap) fulfilledby(some vmcap) bool {
-	if (req & some) == req {
-		return true
-	}
-	return false
-}
 
 type vm struct {
-	Distribution string `json:"distribution"`
-	Kernel       string `json:"kernel"`
-	HasZFS       bool   `json:"zfs"`
-	HasMariaDB   bool   `json:"mariadb"`
-	HasPostgres  bool   `json:"postgres"`
-	HasETCd      bool   `json:"etcd"`
-	HasTCRate    bool   `json:"tcrate"`
-
-	vmcap vmcap
-}
-
-func (v vm) setHasByCap() {
-	v.HasZFS = v.vmcap.isSet(zfs)
-	v.HasMariaDB = v.vmcap.isSet(mariaDB)
-	v.HasPostgres = v.vmcap.isSet(postgres)
-	v.HasETCd = v.vmcap.isSet(etcd)
+	BaseImage string `toml:"base_image"`
 }
 
 type vmInstance struct {
-	nr          int
-	CurrentUUID string
-	vm
+	ImageName string
+	nr        int
 }
 
-func (vm vmInstance) unitName() string {
-	return fmt.Sprintf("LBTEST-vm-%d-%s", vm.nr, vm.CurrentUUID)
+func (vm vmInstance) vmName() string {
+	return fmt.Sprintf("lbtest-vm-%d", vm.nr)
 }
 
-func testIdString(test string, needsETCd bool, vmCount int, platformIdx int) string {
-	return fmt.Sprintf("%s-etcd-%t-%d-%d", test, needsETCd, vmCount, platformIdx)
+func testIdString(test string, vmCount int, platformIdx int) string {
+	return fmt.Sprintf("%s-%d-%d", test, vmCount, platformIdx)
 }
 
-// no parent ctx, we always (try) to do that
-// ch2vm has a lot of "intermediate state" (maybe too much). if we kill it "in the middle" we might for example end up with zfs leftovers
-// start and tear down are fast enough...
-func startVMs(test string, res *testResult, to testOption, controller vmInstance, testnodes ...vmInstance) error {
-	allVMs := []vmInstance{controller}
-	allVMs = append(allVMs, testnodes...)
-	for _, vm := range allVMs {
-		unitName := vm.unitName()
+func provisionImages() error {
+	var provisionWait sync.WaitGroup
+	errCh := make(chan error, len(vmSpec.VMs))
 
-		// clean up, should not be neccessary, but hey...
-		argv := []string{"systemctl", "reset-failed", unitName + ".scope"}
-		res.AppendLog(*quiet, "EXECUTING: %s", argv)
-		// we don't care for the outcome, in be best case it helped, otherwise start will fail
-		exec.Command(argv[0], argv[1:]...).Run()
-
-		mem := "768M"
-		payloads := "sshd;shell"
-		if vm.nr != controller.nr {
-			op := payloads
-
-			pool := "lvm"
-			if *testSuite != "linstor" {
-				pool += ":thinpercent=20"
+	for i, v := range vmSpec.VMs {
+		provisionWait.Add(1)
+		go func(i int, v vm) {
+			defer provisionWait.Done()
+			// TODO ensure we don't use more than *nrVMs when provisioning
+			if err := provisionImage(i+*startVM, v); err != nil {
+				errCh <- err
 			}
-			if to.needsZFS {
-				pool = "zfs"
-			}
-			if *testSuite == "linstor" {
-				pool += ":ramdisk=1G"
-				mem = "2G"
-			}
-
-			payloads = fmt.Sprintf("%s;networking;loaddrbd;", pool)
-			if *testSuite == "linstor" || *testSuite == "golinstor" {
-				var lsetcd string
-				if to.needsETCd {
-					lsetcd = ":etcd"
-				}
-				payloads += fmt.Sprintf("linstor:combined%s;", lsetcd)
-				if to.needsPostgres {
-					payloads += "db:postgres;"
-				}
-				if to.needsMariaDB {
-					payloads += "db:mariadb;"
-				}
-				if to.needsETCd {
-					payloads += "db:etcd;"
-				}
-			} else if *testSuite == "drbdproxy" {
-				payloads += "drbdproxy;"
-			}
-			payloads += op
-		}
-		argv = []string{"systemd-run", "--unit=" + unitName, "--scope",
-			"./ch2vm.sh", "-s", *testSuite, "-d", vm.Distribution, "-k", vm.Kernel,
-			"-m", mem,
-			"--uuid", vm.CurrentUUID,
-			"-v", fmt.Sprintf("%d", vm.nr), "-p", payloads}
-
-		var stdout *os.File
-		var stderr *os.File
-		if jenkins.IsActive() {
-			testOut := testIdString(test, to.needsETCd, len(allVMs)-1, to.platformIdx)
-			jdir := jenkins.LogDir(testOut)
-			argv = append(argv, fmt.Sprintf("--jdir=%s", jdir))
-			argv = append(argv, fmt.Sprintf("--jtest=%s", test))
-
-			vmOutDir := filepath.Join("log", testOut, "outsideVM")
-
-			var err error
-			stdout, err = jenkins.CreateFile(vmOutDir, fmt.Sprintf("vm-%d-stdout.log", vm.nr))
-			if err != nil {
-				return err
-			}
-
-			stderr, err = jenkins.CreateFile(vmOutDir, fmt.Sprintf("vm-%d-stderr.log", vm.nr))
-			if err != nil {
-				return err
-			}
-		}
-
-		res.AppendLog(*quiet, "EXECUTING: %s", argv)
-		cmd := exec.Command(argv[0], argv[1:]...)
-		cmd.Stdout = stdout
-		cmd.Stderr = stderr
-
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-
-		systemdScope.Add(1)
-		go func(cmd *exec.Cmd) {
-			defer systemdScope.Done()
-			cmd.Wait()
-		}(cmd)
+		}(i, v)
 	}
 
-	return nil
+	provisionWait.Wait()
+	close(errCh)
+
+	// return the first error, if any
+	err := <-errCh
+	return err
 }
 
-// no parent ctx, we always (try) to do that
-func shutdownVMs(res *testResult, controller vmInstance, testnodes ...vmInstance) error {
-	allVMs := []vmInstance{controller}
-	allVMs = append(allVMs, testnodes...)
+func provisionImage(nr int, v vm) error {
+	newImageName := vmSpec.ImageName(v)
 
-	for _, vm := range allVMs {
-		unitName := vm.unitName()
+	// clean up, should not be neccessary, but hey...
+	argv := []string{"virter", "vm", "rm", newImageName}
+	log.Printf("EXECUTING: %s", argv)
+	// this command is idempotent, so even if it does nothing, it returns zero
+	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
+		return err
+	}
 
-		argv := []string{"systemctl", "stop", unitName + ".scope"}
-		res.AppendLog(*quiet, "EXECUTING: %s", argv)
+	argv = []string{"virter", "image", "build",
+		"--provision", vmSpec.ProvisionFile,
+		"--id", strconv.Itoa(nr),
+		v.BaseImage,
+		newImageName}
+
+	log.Printf("EXECUTING: %s", argv)
+	cmd := exec.Command(argv[0], argv[1:]...)
+
+	// use Output to capture stderr if the exit code is non-zero
+	_, err := cmd.Output()
+	return err
+}
+
+func removeImages() {
+	for _, v := range vmSpec.VMs {
+		newImageName := vmSpec.ImageName(v)
+
+		argv := []string{"virter", "vm", "rm", newImageName}
+		log.Printf("EXECUTING: %s", argv)
 		if stdouterr, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
-			res.AppendLog(*quiet, "ERROR: Could not stop unit %s %v: stdouterr: %s", unitName, err, stdouterr)
+			log.Printf("ERROR: Could not remove image %s %v: stdouterr: %s", newImageName, err, stdouterr)
 			// do not return, keep going...
 		}
 	}
-	res.AppendLog(*quiet, "Waited for VMs")
+}
+
+func startVMs(res *testResult, to testOption, testnodes ...vmInstance) error {
+	var vmStartWait sync.WaitGroup
+	errCh := make(chan error, len(testnodes))
+
+	for _, vm := range testnodes {
+		vmStartWait.Add(1)
+		go func(vm vmInstance) {
+			defer vmStartWait.Done()
+			if err := runVM(res, to, vm); err != nil {
+				errCh <- err
+			}
+		}(vm)
+	}
+
+	vmStartWait.Wait()
+	close(errCh)
+
+	// return the first error, if any
+	err := <-errCh
+	return err
+}
+
+func runVM(res *testResult, to testOption, vm vmInstance) error {
+	vmName := vm.vmName()
+
+	// clean up, should not be neccessary, but hey...
+	argv := []string{"virter", "vm", "rm", vmName}
+	res.AppendLog(*quiet, "EXECUTING: %s", argv)
+	// this command is idempotent, so even if it does nothing, it returns zero
+	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
+		return err
+	}
+
+	mem := "4G"
+	argv = []string{"virter", "vm", "run",
+		"--name", vmName,
+		"--id", strconv.Itoa(vm.nr),
+		"--memory", mem,
+		"--vcpus", "4",
+		"--wait-ssh",
+		vm.ImageName}
+
+	res.AppendLog(*quiet, "EXECUTING: %s", argv)
+	cmd := exec.Command(argv[0], argv[1:]...)
+
+	// use Output to capture stderr if the exit code is non-zero
+	_, err := cmd.Output()
+	return err
+}
+
+// no parent ctx, we always (try) to do that
+func shutdownVMs(res *testResult, testnodes ...vmInstance) error {
+	for _, vm := range testnodes {
+		vmName := vm.vmName()
+
+		argv := []string{"virter", "vm", "rm", vmName}
+		res.AppendLog(*quiet, "EXECUTING: %s", argv)
+		if stdouterr, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
+			res.AppendLog(*quiet, "ERROR: Could not stop VM %s %v: stdouterr: %s", vmName, err, stdouterr)
+			// do not return, keep going...
+		}
+	}
 
 	return nil
 }
