@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"context"
@@ -16,8 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LINBIT/lbtest/cmd/vmshed/config"
 	"github.com/nightlyone/lockfile"
+
+	"github.com/LINBIT/vmshed/cmd/config"
 )
 
 var allVMs []vm
@@ -44,7 +45,8 @@ var (
 	version     = flag.Bool("version", false, "Print version and exit")
 )
 
-func main() {
+// Execute runs vmshed
+func Execute() {
 	flag.Parse()
 	prog := path.Base(os.Args[0])
 
