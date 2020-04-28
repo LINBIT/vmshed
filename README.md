@@ -15,3 +15,17 @@ Example:
 ```
 vmshed -tests example/tests.example.toml -vms example/vms.example.toml
 ```
+
+## Usage in Docker
+
+Running vmshed in Docker is a little complicated due to its dependencies. Here
+is an example:
+
+```
+$ docker run -it --rm -v /my-config/virter:/root/.config/virter:ro \
+  -v /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v `pwd`/example:/opt/virter/example \
+  --network=host \
+  vmshed -tests example/tests.example.toml -vms example/vms.example.toml
+```
