@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -142,6 +143,9 @@ func provisionAndExec(testSpec testSpecification) int {
 	if vmSpec.ProvisionFile != "" {
 		defer removeImages()
 		if err := provisionImages(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				log.Print(string(exitErr.Stderr))
+			}
 			log.Fatal(err)
 		}
 	}
