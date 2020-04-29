@@ -80,11 +80,13 @@ func Execute() {
 	if _, err := toml.DecodeFile(*vmSpecPath, &vmSpec); err != nil {
 		log.Fatal(err)
 	}
+	vmSpec.ProvisionFile = joinIfRel(filepath.Dir(*vmSpecPath), vmSpec.ProvisionFile)
 
 	var testSpec testSpecification
 	if _, err := toml.DecodeFile(*testSpecPath, &testSpec); err != nil {
 		log.Fatal(err)
 	}
+	testSpec.TestSuiteFile = joinIfRel(filepath.Dir(*testSpecPath), testSpec.TestSuiteFile)
 
 	var tests []testGroup
 	for _, test := range testSpec.TestGroups {
@@ -176,4 +178,11 @@ func finalVMs(to testOption, origTestnodes ...vmInstance) ([]vmInstance, error) 
 
 func ctxCancled(ctx context.Context) bool {
 	return ctx.Err() != nil
+}
+
+func joinIfRel(basepath string, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(basepath, path)
 }

@@ -1,4 +1,4 @@
-test_suite_file = "example/test-run-execute.virter.toml"
+test_suite_file = "test-run-execute.virter.toml"
 
 [[group]]
 vms = 2

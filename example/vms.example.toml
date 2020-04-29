@@ -1,5 +1,5 @@
 name = "example"
-provision_file = "example/test-run-provision.virter.toml"
+provision_file = "test-run-provision.virter.toml"
 
 [[vms]]
 base_image = "centos-7"
