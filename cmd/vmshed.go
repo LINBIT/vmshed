@@ -180,7 +180,7 @@ func ctxCancled(ctx context.Context) bool {
 }
 
 func joinIfRel(basepath string, path string) string {
-	if filepath.IsAbs(path) {
+	if path == "" || filepath.IsAbs(path) {
 		return path
 	}
 	return filepath.Join(basepath, path)
