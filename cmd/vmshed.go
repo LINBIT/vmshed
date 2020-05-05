@@ -53,7 +53,6 @@ var (
 	failGrp      = flag.Bool("failgroup", false, "Stop executing tests when at least one failed in the test group")
 	quiet        = flag.Bool("quiet", false, "Don't print progess messages while tests are running")
 	jenkinsWS    = flag.String("jenkins", "", "If this is set to a path for the current job, text output is saved to files, logs get copied,...")
-	sshTimeout   = flag.Duration("sshping", 3*time.Minute, "Timeout for ssh pinging the controller node")
 	testTimeout  = flag.Duration("testtime", 5*time.Minute, "Timeout for a single test execution in a VM")
 	version      = flag.Bool("version", false, "Print version and exit")
 )
