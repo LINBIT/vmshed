@@ -22,7 +22,13 @@ func checkWorkspacePath(path string) error {
 		return fmt.Errorf("'%s' is not an absolute path", path)
 	}
 	if st, err := os.Stat(path); err != nil {
-		return fmt.Errorf("Could not stat %s: %v", path, err)
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("Could not stat %s: %v", path, err)
+		}
+		err := os.MkdirAll(path, 0755)
+		if err != nil {
+			return fmt.Errorf("Could not mkdir %s: %v", path, err)
+		}
 	} else if !st.IsDir() {
 		return fmt.Errorf("'%s' is not a directory", path)
 	}
