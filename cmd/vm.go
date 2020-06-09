@@ -25,7 +25,7 @@ func testIdString(test string, vmCount int, platformIdx int) string {
 	return fmt.Sprintf("%s-%d-%d", test, vmCount, platformIdx)
 }
 
-func provisionImages() error {
+func provisionImages(vmSpec *vmSpecification, startVM int) error {
 	var provisionWait sync.WaitGroup
 	errCh := make(chan error, len(vmSpec.VMs))
 
@@ -34,7 +34,7 @@ func provisionImages() error {
 		go func(i int, v vm) {
 			defer provisionWait.Done()
 			// TODO ensure we don't use more than *nrVMs when provisioning
-			if err := provisionImage(i+*startVM, v); err != nil {
+			if err := provisionImage(vmSpec, i+startVM, v); err != nil {
 				errCh <- err
 			}
 		}(i, v)
@@ -48,7 +48,7 @@ func provisionImages() error {
 	return err
 }
 
-func provisionImage(nr int, v vm) error {
+func provisionImage(vmSpec *vmSpecification, nr int, v vm) error {
 	newImageName := vmSpec.ImageName(v)
 
 	// clean up, should not be neccessary, but hey...
@@ -73,7 +73,7 @@ func provisionImage(nr int, v vm) error {
 	return err
 }
 
-func removeImages() {
+func removeImages(vmSpec *vmSpecification) {
 	for _, v := range vmSpec.VMs {
 		newImageName := vmSpec.ImageName(v)
 
@@ -86,7 +86,7 @@ func removeImages() {
 	}
 }
 
-func startVMs(res *testResult, to testOption, testnodes ...vmInstance) error {
+func startVMs(res *testResult, to testOption, quiet bool, testnodes ...vmInstance) error {
 	var vmStartWait sync.WaitGroup
 	errCh := make(chan error, len(testnodes))
 
@@ -94,7 +94,7 @@ func startVMs(res *testResult, to testOption, testnodes ...vmInstance) error {
 		vmStartWait.Add(1)
 		go func(vm vmInstance) {
 			defer vmStartWait.Done()
-			if err := runVM(res, to, vm); err != nil {
+			if err := runVM(res, to, quiet, vm); err != nil {
 				errCh <- err
 			}
 		}(vm)
@@ -108,12 +108,12 @@ func startVMs(res *testResult, to testOption, testnodes ...vmInstance) error {
 	return err
 }
 
-func runVM(res *testResult, to testOption, vm vmInstance) error {
+func runVM(res *testResult, to testOption, quiet bool, vm vmInstance) error {
 	vmName := vm.vmName()
 
 	// clean up, should not be neccessary, but hey...
 	argv := []string{"virter", "vm", "rm", vmName}
-	res.AppendLog(*quiet, "EXECUTING: %s", argv)
+	res.AppendLog(quiet, "EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
 	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
 		return err
@@ -128,7 +128,7 @@ func runVM(res *testResult, to testOption, vm vmInstance) error {
 		"--wait-ssh",
 		vm.ImageName}
 
-	res.AppendLog(*quiet, "EXECUTING: %s", argv)
+	res.AppendLog(quiet, "EXECUTING: %s", argv)
 	cmd := exec.Command(argv[0], argv[1:]...)
 
 	// use Output to capture stderr if the exit code is non-zero
@@ -137,14 +137,14 @@ func runVM(res *testResult, to testOption, vm vmInstance) error {
 }
 
 // no parent ctx, we always (try) to do that
-func shutdownVMs(res *testResult, testnodes ...vmInstance) error {
+func shutdownVMs(res *testResult, quiet bool, testnodes ...vmInstance) error {
 	for _, vm := range testnodes {
 		vmName := vm.vmName()
 
 		argv := []string{"virter", "vm", "rm", vmName}
-		res.AppendLog(*quiet, "EXECUTING: %s", argv)
+		res.AppendLog(quiet, "EXECUTING: %s", argv)
 		if stdouterr, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
-			res.AppendLog(*quiet, "ERROR: Could not stop VM %s %v: stdouterr: %s", vmName, err, stdouterr)
+			res.AppendLog(quiet, "ERROR: Could not stop VM %s %v: stdouterr: %s", vmName, err, stdouterr)
 			// do not return, keep going...
 		}
 	}

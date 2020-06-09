@@ -98,16 +98,16 @@ func (r *testResult) AppendInVM(quiet bool, format string, v ...interface{}) {
 	r.writeLog(r.inVMLogger, quiet, format, v...)
 }
 
-func execTests(testSpec *testSpecification, nrVMs int, nrPool chan int) (int, error) {
+func execTests(testRun *TestRun, nrPool chan int) (int, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	var overallFailed int
 	var testLogLock sync.Mutex // tests run in parallel, but we want the result blocks/logs somehow serialized.
 	var testsWG sync.WaitGroup
-	for _, testGrp := range testSpec.TestGroups {
-		if testGrp.NrVMs > nrVMs {
-			return 1, fmt.Errorf("This test group requires %d VMs, but we only have %d VMs overall", testGrp.NrVMs, nrVMs)
+	for _, testGrp := range testRun.testSpec.TestGroups {
+		if testGrp.NrVMs > testRun.nrVMs {
+			return 1, fmt.Errorf("This test group requires %d VMs, but we only have %d VMs overall", testGrp.NrVMs, testRun.nrVMs)
 		}
 
 		allPlatforms := make(map[string]int)
@@ -118,7 +118,7 @@ func execTests(testSpec *testSpecification, nrVMs int, nrPool chan int) (int, er
 			allTests = append(allTests, t)
 			for _, a := range testGrp.NeedAllPlatforms {
 				if a == t {
-					for i := 0; i < len(vmSpec.VMs)-1; i++ {
+					for i := 0; i < len(testRun.vmSpec.VMs)-1; i++ {
 						allTests = append(allTests, t)
 					}
 					break
@@ -129,7 +129,7 @@ func execTests(testSpec *testSpecification, nrVMs int, nrPool chan int) (int, er
 		errs := errorlog.NewErrorLog()
 		start := time.Now()
 		for _, t := range allTests {
-			if *failTest && errs.Len() > 0 {
+			if testRun.failTest && errs.Len() > 0 {
 				break
 			}
 
@@ -153,17 +153,17 @@ func execTests(testSpec *testSpecification, nrVMs int, nrPool chan int) (int, er
 			var vms []vmInstance
 			for i := 0; i < testGrp.NrVMs; i++ {
 				nr := <-nrPool
-				r, err := rand.Int(rand.Reader, big.NewInt(int64(len(vmSpec.VMs))))
+				r, err := rand.Int(rand.Reader, big.NewInt(int64(len(testRun.vmSpec.VMs))))
 				if err != nil {
 					return 1, err
 				}
 				v := vmInstance{
-					ImageName: vmSpec.ImageName(vmSpec.VMs[r.Int64()]),
+					ImageName: testRun.vmSpec.ImageName(testRun.vmSpec.VMs[r.Int64()]),
 					nr:        nr,
 				}
 				vms = append(vms, v)
 			}
-			vms, err := finalVMs(to, vms...)
+			vms, err := finalVMs(testRun.vmSpec, to, vms...)
 			if err != nil {
 				return 1, err
 			}
@@ -173,18 +173,18 @@ func execTests(testSpec *testSpecification, nrVMs int, nrPool chan int) (int, er
 				defer testsWG.Done()
 
 				stTest := time.Now()
-				testRes := execTest(ctx, testSpec, st, to, nrPool, testnodes...)
+				testRes := execTest(ctx, testRun, st, to, nrPool, testnodes...)
 				if err := testRes.err; err != nil {
 					errs.Append(err)
-					if *failTest {
-						log.Println(cmdName, "ERROR:", "Canceling ctx of running tests")
+					if testRun.failTest {
+						log.Println(testRun.cmdName, "ERROR:", "Canceling ctx of running tests")
 						cancel()
 					}
 				}
 				testRes.execTime = time.Since(stTest)
 				testOut := testIdString(st, testGrp.NrVMs, to.platformIdx)
 				testDirOut := filepath.Join("log", testOut)
-				testRes.AppendLog(*quiet, "EXECUTIONTIME: %s, %v", testOut, testRes.execTime)
+				testRes.AppendLog(testRun.quiet, "EXECUTIONTIME: %s, %v", testOut, testRes.execTime)
 
 				testLogLock.Lock()
 				defer testLogLock.Unlock()
@@ -195,21 +195,21 @@ func execTests(testSpec *testSpecification, nrVMs int, nrPool chan int) (int, er
 				}
 				fmt.Println("===========================================================================")
 				fmt.Printf("| ** Results for %s - %s\n", testOut, state)
-				if jenkins.IsActive() {
+				if testRun.jenkins.IsActive() {
 					fmt.Printf("| ** %s/artifact/%s\n", os.Getenv("BUILD_URL"), testDirOut)
 				}
 				fmt.Println("===========================================================================")
 				testLog := testRes.Log()
 				fmt.Print(&testLog)
 
-				if jenkins.IsActive() {
+				if testRun.jenkins.IsActive() {
 					inVM := testRes.InVM()
-					if err := jenkins.Log(testDirOut, "inVM.log", &inVM); err != nil {
+					if err := testRun.jenkins.Log(testDirOut, "inVM.log", &inVM); err != nil {
 						errs.Append(err)
 					}
 
 					xmllog := testRes.InVM()
-					if err := jenkins.XMLLog("test-results", testOut, testRes, &xmllog); err != nil {
+					if err := testRun.jenkins.XMLLog("test-results", testOut, testRes, &xmllog); err != nil {
 						errs.Append(err)
 					}
 				} else {
@@ -222,19 +222,19 @@ func execTests(testSpec *testSpecification, nrVMs int, nrPool chan int) (int, er
 
 		}
 		testsWG.Wait()
-		log.Println(cmdName, "Group:", testGrp.NrVMs, "EXECUTIONTIME for Group:", testGrp.NrVMs, time.Since(start))
+		log.Println(testRun.cmdName, "Group:", testGrp.NrVMs, "EXECUTIONTIME for Group:", testGrp.NrVMs, time.Since(start))
 
 		nErrs := errs.Len()
 		if nErrs > 0 {
 			overallFailed += nErrs
 			log.Println("ERROR: Printing erros for Group:", testGrp.NrVMs)
 			for _, err := range errs.Errs() {
-				log.Println(cmdName, err)
+				log.Println(testRun.cmdName, err)
 				if exitErr, ok := err.(*exec.ExitError); ok {
 					log.Print(string(exitErr.Stderr))
 				}
 			}
-			if *failGrp || *failTest {
+			if testRun.failGrp || testRun.failTest {
 				return overallFailed, errors.New("At least one test in the test group failed, giving up early")
 			}
 		}
@@ -242,8 +242,8 @@ func execTests(testSpec *testSpecification, nrVMs int, nrPool chan int) (int, er
 	return overallFailed, nil
 }
 
-func execTest(ctx context.Context, testSpec *testSpecification, test string, to testOption, nrPool chan<- int, testnodes ...vmInstance) *testResult {
-	res := newTestResult(cmdName)
+func execTest(ctx context.Context, testRun *TestRun, test string, to testOption, nrPool chan<- int, testnodes ...vmInstance) *testResult {
+	res := newTestResult(testRun.cmdName)
 
 	// we always want to hand back the random VMS
 	defer func() {
@@ -258,29 +258,29 @@ func execTest(ctx context.Context, testSpec *testSpecification, test string, to 
 
 	// Start VMs
 	start := time.Now()
-	err := startVMs(res, to, testnodes...)
-	defer shutdownVMs(res, testnodes...)
+	err := startVMs(res, to, testRun.quiet, testnodes...)
+	defer shutdownVMs(res, testRun.quiet, testnodes...)
 	if err != nil {
 		res.err = err
 		return res
 	}
-	res.AppendLog(*quiet, "EXECUTIONTIME: Starting VMs: %v", time.Since(start))
+	res.AppendLog(testRun.quiet, "EXECUTIONTIME: Starting VMs: %v", time.Since(start))
 
 	argv := []string{"virter", "vm", "exec",
-		"--provision", testSpec.TestSuiteFile}
+		"--provision", testRun.testSpec.TestSuiteFile}
 	for _, vm := range testnodes {
 		argv = append(argv, vm.vmName())
 	}
 
-	res.AppendLog(*quiet, "EXECUTING the actual test: %s", argv)
+	res.AppendLog(testRun.quiet, "EXECUTING the actual test: %s", argv)
 
 	start = time.Now()
-	ctx, cancel := context.WithTimeout(ctx, *testTimeout)
+	ctx, cancel := context.WithTimeout(ctx, testRun.testTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	out, testErr := cmd.CombinedOutput()
 	res.AppendInVM(true, "%s\n", out)
-	res.AppendLog(*quiet, "EXECUTIONTIME: %s %v", testInstance, time.Since(start))
+	res.AppendLog(testRun.quiet, "EXECUTIONTIME: %s %v", testInstance, time.Since(start))
 	if testErr != nil { // "real" error or ctx canceled
 		res.err = fmt.Errorf("ERROR: %s %v", testInstance, testErr)
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -288,7 +288,7 @@ func execTest(ctx context.Context, testSpec *testSpecification, test string, to 
 		}
 		return res
 	}
-	res.AppendLog(*quiet, "SUCCESS: %s", testInstance)
+	res.AppendLog(testRun.quiet, "SUCCESS: %s", testInstance)
 
 	return res
 }
