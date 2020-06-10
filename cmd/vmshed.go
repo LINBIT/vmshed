@@ -41,6 +41,7 @@ type TestRun struct {
 	cmdName     string
 	vmSpec      *vmSpecification
 	testSpec    *testSpecification
+	overrides   []string
 	jenkins     *Jenkins
 	nrVMs       int
 	failTest    bool
@@ -62,6 +63,7 @@ func rootCommand() *cobra.Command {
 
 	var vmSpecPath string
 	var testSpecPath string
+	var provisionOverrides []string
 	var toRun string
 	var startVM int
 	var nrVMs int
@@ -132,6 +134,7 @@ func rootCommand() *cobra.Command {
 				cmdName:     cmdName,
 				vmSpec:      &vmSpec,
 				testSpec:    &testSpec,
+				overrides:   provisionOverrides,
 				jenkins:     jenkins,
 				nrVMs:       nrVMs,
 				failTest:    failTest,
@@ -154,6 +157,7 @@ func rootCommand() *cobra.Command {
 
 	rootCmd.Flags().StringVarP(&vmSpecPath, "vms", "", "vms.toml", "File containing VM specification")
 	rootCmd.Flags().StringVarP(&testSpecPath, "tests", "", "tests.toml", "File containing test specification")
+	rootCmd.Flags().StringSliceVarP(&provisionOverrides, "set", "s", []string{}, "set/override provisioning steps, for example '--set values.X=y'")
 	rootCmd.Flags().StringVarP(&toRun, "torun", "", "all", "comma separated list of test names to execute ('all' is a reserved test name)")
 	rootCmd.Flags().IntVarP(&startVM, "startvm", "", 2, "Number of the first VM to start in parallel")
 	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm")
@@ -186,7 +190,7 @@ func provisionAndExec(testRun *TestRun, startVM int) int {
 
 	if testRun.vmSpec.ProvisionFile != "" {
 		defer removeImages(testRun.vmSpec)
-		if err := provisionImages(testRun.vmSpec, startVM); err != nil {
+		if err := provisionImages(testRun.vmSpec, testRun.overrides, startVM); err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				log.Print(string(exitErr.Stderr))
 			}

@@ -25,7 +25,7 @@ func testIdString(test string, vmCount int, platformIdx int) string {
 	return fmt.Sprintf("%s-%d-%d", test, vmCount, platformIdx)
 }
 
-func provisionImages(vmSpec *vmSpecification, startVM int) error {
+func provisionImages(vmSpec *vmSpecification, overrides []string, startVM int) error {
 	var provisionWait sync.WaitGroup
 	errCh := make(chan error, len(vmSpec.VMs))
 
@@ -34,7 +34,7 @@ func provisionImages(vmSpec *vmSpecification, startVM int) error {
 		go func(i int, v vm) {
 			defer provisionWait.Done()
 			// TODO ensure we don't use more than *nrVMs when provisioning
-			if err := provisionImage(vmSpec, i+startVM, v); err != nil {
+			if err := provisionImage(vmSpec, overrides, i+startVM, v); err != nil {
 				errCh <- err
 			}
 		}(i, v)
@@ -48,7 +48,7 @@ func provisionImages(vmSpec *vmSpecification, startVM int) error {
 	return err
 }
 
-func provisionImage(vmSpec *vmSpecification, nr int, v vm) error {
+func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v vm) error {
 	newImageName := vmSpec.ImageName(v)
 
 	// clean up, should not be neccessary, but hey...
@@ -60,10 +60,12 @@ func provisionImage(vmSpec *vmSpecification, nr int, v vm) error {
 	}
 
 	argv = []string{"virter", "image", "build",
-		"--provision", vmSpec.ProvisionFile,
 		"--id", strconv.Itoa(nr),
-		v.BaseImage,
-		newImageName}
+		"--provision", vmSpec.ProvisionFile}
+	for _, override := range overrides {
+		argv = append(argv, "--set", override)
+	}
+	argv = append(argv, v.BaseImage, newImageName)
 
 	log.Printf("EXECUTING: %s", argv)
 	cmd := exec.Command(argv[0], argv[1:]...)

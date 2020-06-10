@@ -268,6 +268,9 @@ func execTest(ctx context.Context, testRun *TestRun, test string, to testOption,
 
 	argv := []string{"virter", "vm", "exec",
 		"--provision", testRun.testSpec.TestSuiteFile}
+	for _, override := range testRun.overrides {
+		argv = append(argv, "--set", override)
+	}
 	for _, vm := range testnodes {
 		argv = append(argv, vm.vmName())
 	}
