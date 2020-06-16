@@ -127,6 +127,7 @@ func runVM(res *testResult, to testOption, quiet bool, vm vmInstance) error {
 		"--id", strconv.Itoa(vm.nr),
 		"--memory", mem,
 		"--vcpus", "4",
+		"--disk", "name=data,size=2G,bus=scsi",
 		"--wait-ssh",
 		vm.ImageName}
 
