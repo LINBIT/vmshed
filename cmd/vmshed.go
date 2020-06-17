@@ -188,6 +188,18 @@ func provisionAndExec(testRun *TestRun, startVM int) int {
 		defer lock.Unlock()
 	}
 
+	// Workaround: When virter first starts it generates a key pair.
+	// However, when we start multiple instances concurrently, they race.
+	// The result is that the VMs start successfully, but then the test can
+	// only connect to one of them. Each VM has been provided a different
+	// key, but the test only has the key that was written last.
+	log.Println("Initialize virter")
+	argv := []string{"virter", "image", "ls", "--available"}
+	log.Printf("EXECUTING: %s", argv)
+	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
+		log.Fatalf("ERROR: %v", err)
+	}
+
 	if testRun.vmSpec.ProvisionFile != "" {
 		defer removeImages(testRun.vmSpec)
 		if err := provisionImages(testRun.vmSpec, testRun.overrides, startVM); err != nil {
