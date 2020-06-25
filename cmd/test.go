@@ -278,11 +278,21 @@ func execTest(ctx context.Context, testRun *TestRun, test string, to testOption,
 	res.AppendLog(testRun.quiet, "EXECUTING the actual test: %s", argv)
 
 	start = time.Now()
+
 	ctx, cancel := context.WithTimeout(ctx, testRun.testTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+
+	cmd := exec.Command(argv[0], argv[1:]...)
+
+	testDone := make(chan struct{})
+	go handleTestTermination(ctx, cmd, testDone, res, testRun.quiet)
+
 	out, testErr := cmd.CombinedOutput()
+
+	close(testDone)
+
 	res.AppendInVM(true, "%s\n", out)
+
 	res.AppendLog(testRun.quiet, "EXECUTIONTIME: %s %v", testInstance, time.Since(start))
 	if testErr != nil { // "real" error or ctx canceled
 		res.err = fmt.Errorf("ERROR: %s %v", testInstance, testErr)
@@ -294,4 +304,19 @@ func execTest(ctx context.Context, testRun *TestRun, test string, to testOption,
 	res.AppendLog(testRun.quiet, "SUCCESS: %s", testInstance)
 
 	return res
+}
+
+func handleTestTermination(ctx context.Context, cmd *exec.Cmd, done <-chan struct{}, res *testResult, quiet bool) {
+	select {
+	case <-ctx.Done():
+		res.AppendLog(quiet, "TERMINATING test with SIGINT")
+		cmd.Process.Signal(os.Interrupt)
+		select {
+		case <-time.After(10 * time.Second):
+			res.AppendLog(quiet, "WARNING! TERMINATING test with SIGKILL")
+			cmd.Process.Kill()
+		case <-done:
+		}
+	case <-done:
+	}
 }
