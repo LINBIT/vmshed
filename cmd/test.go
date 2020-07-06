@@ -266,8 +266,11 @@ func execTest(ctx context.Context, testRun *TestRun, test string, to testOption,
 	}
 	res.AppendLog(testRun.quiet, "EXECUTIONTIME: Starting VMs: %v", time.Since(start))
 
+	testNameEnv := fmt.Sprintf("env.TEST_NAME=%s", test)
+
 	argv := []string{"virter", "vm", "exec",
-		"--provision", testRun.testSpec.TestSuiteFile}
+		"--provision", testRun.testSpec.TestSuiteFile,
+		"--set", testNameEnv}
 	for _, override := range testRun.overrides {
 		argv = append(argv, "--set", override)
 	}

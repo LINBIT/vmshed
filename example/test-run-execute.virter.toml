@@ -1,6 +1,7 @@
 [[steps]]
 [steps.shell]
 script = """
+echo "Running test: $TEST_NAME"
 if [ ! -e /provision-file ]; then
 	echo "File not found"
 	exit 1

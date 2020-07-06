@@ -3,5 +3,6 @@ test_suite_file = "test-run-execute.virter.toml"
 [[group]]
 vms = 2
 tests = [
-  "example_test",
+  "example_test_a",
+  "example_test_b",
 ]
