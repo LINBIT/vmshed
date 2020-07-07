@@ -52,7 +52,7 @@ func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v vm) e
 	newImageName := vmSpec.ImageName(v)
 
 	// clean up, should not be neccessary, but hey...
-	argv := []string{"virter", "vm", "rm", newImageName}
+	argv := []string{"virter", "image", "rm", newImageName}
 	log.Printf("EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
 	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
@@ -79,7 +79,7 @@ func removeImages(vmSpec *vmSpecification) {
 	for _, v := range vmSpec.VMs {
 		newImageName := vmSpec.ImageName(v)
 
-		argv := []string{"virter", "vm", "rm", newImageName}
+		argv := []string{"virter", "image", "rm", newImageName}
 		log.Printf("EXECUTING: %s", argv)
 		if stdouterr, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
 			log.Printf("ERROR: Could not remove image %s %v: stdouterr: %s", newImageName, err, stdouterr)
