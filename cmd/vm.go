@@ -9,7 +9,8 @@ import (
 )
 
 type vm struct {
-	BaseImage string `toml:"base_image"`
+	BaseImage string            `toml:"base_image"`
+	Values    map[string]string `toml:"values"`
 }
 
 type vmInstance struct {
@@ -64,6 +65,9 @@ func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v vm) e
 		"--provision", vmSpec.ProvisionFile}
 	for _, override := range overrides {
 		argv = append(argv, "--set", override)
+	}
+	for key, value := range v.Values {
+		argv = append(argv, "--set", "values."+key+"="+value)
 	}
 	argv = append(argv, v.BaseImage, newImageName)
 
