@@ -64,6 +64,7 @@ func rootCommand() *cobra.Command {
 	var vmSpecPath string
 	var testSpecPath string
 	var provisionOverrides []string
+	var baseImages []string
 	var toRun string
 	var startVM int
 	var nrVMs int
@@ -98,6 +99,7 @@ func rootCommand() *cobra.Command {
 				log.Fatal(err)
 			}
 			vmSpec.ProvisionFile = joinIfRel(filepath.Dir(vmSpecPath), vmSpec.ProvisionFile)
+			vmSpec.VMs = filterVMs(vmSpec.VMs, baseImages)
 
 			var testSpec testSpecification
 			if _, err := toml.DecodeFile(testSpecPath, &testSpec); err != nil {
@@ -158,6 +160,7 @@ func rootCommand() *cobra.Command {
 	rootCmd.Flags().StringVarP(&vmSpecPath, "vms", "", "vms.toml", "File containing VM specification")
 	rootCmd.Flags().StringVarP(&testSpecPath, "tests", "", "tests.toml", "File containing test specification")
 	rootCmd.Flags().StringSliceVarP(&provisionOverrides, "set", "s", []string{}, "set/override provisioning steps, for example '--set values.X=y'")
+	rootCmd.Flags().StringSliceVarP(&baseImages, "base-image", "", []string{}, "VM base images to use (defaults to all)")
 	rootCmd.Flags().StringVarP(&toRun, "torun", "", "all", "comma separated list of test names to execute ('all' is a reserved test name)")
 	rootCmd.Flags().IntVarP(&startVM, "startvm", "", 2, "Number of the first VM to start in parallel")
 	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm")
@@ -243,4 +246,26 @@ func joinIfRel(basepath string, path string) string {
 		return path
 	}
 	return filepath.Join(basepath, path)
+}
+
+func filterVMs(vms []vm, baseImages []string) []vm {
+	if len(baseImages) == 0 {
+		return vms
+	}
+
+	selected := []vm{}
+	for _, vm := range vms {
+		found := false
+		for _, baseImage := range baseImages {
+			if vm.BaseImage == baseImage {
+				found = true
+			}
+		}
+
+		if found {
+			selected = append(selected, vm)
+		}
+	}
+
+	return selected
 }
