@@ -55,11 +55,15 @@ func NewJenkinsMust(workspacePath string) *Jenkins {
 func (j *Jenkins) Workspace() string { return j.wsPath }
 func (j *Jenkins) IsActive() bool    { return j.Workspace() != "" }
 
+func (j *Jenkins) SubDir(subdir string) string {
+	return filepath.Join(j.wsPath, subdir)
+}
+
 func (j *Jenkins) createSubDir(subdir string) (string, error) {
 	if !j.IsActive() {
 		return "", errors.New("This is not a jenkins run")
 	}
-	p := filepath.Join(j.wsPath, subdir)
+	p := j.SubDir(subdir)
 
 	if st, err := os.Stat(p); err == nil && st.IsDir() {
 		return p, nil

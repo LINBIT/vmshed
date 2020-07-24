@@ -28,6 +28,7 @@ type testOption struct {
 	testName          string
 	testID            string
 	testDirOut        string
+	consoleDir        string
 	needsSameVMs      bool
 	needsAllPlatforms bool
 	platformIdx       int
@@ -147,6 +148,7 @@ func execTests(testRun *TestRun, nrPool chan int) (int, error) {
 
 			if testRun.jenkins.IsActive() {
 				to.testDirOut = filepath.Join("log", to.testID)
+				to.consoleDir = testRun.jenkins.SubDir(to.testDirOut)
 			}
 
 			for _, s := range testGrp.SameVMs {
