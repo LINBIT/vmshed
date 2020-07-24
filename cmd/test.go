@@ -42,8 +42,8 @@ type testResult struct {
 	log       bytes.Buffer // log messages of the framework (starting test, timing information,...)
 	logLogger *log.Logger
 
-	inVM       bytes.Buffer // combined output of stdout/stderr of the test itself (ssh-output)
-	inVMLogger *log.Logger
+	testLog    bytes.Buffer // output of the test itself ('virter vm exec' output)
+	testLogger *log.Logger
 
 	execTime time.Duration
 
@@ -55,7 +55,7 @@ func newTestResult(prefix string) *testResult {
 	tr := testResult{}
 	p := prefix + ": "
 	tr.logLogger = log.New(&tr.log, p, log.Ldate)
-	tr.inVMLogger = log.New(&tr.inVM, p, log.Ldate)
+	tr.testLogger = log.New(&tr.testLog, p, log.Ldate)
 	return &tr
 }
 
@@ -73,10 +73,10 @@ func (r *testResult) Log() bytes.Buffer {
 	return r.log
 }
 
-func (r *testResult) InVM() bytes.Buffer {
+func (r *testResult) TestLog() bytes.Buffer {
 	r.Lock()
 	defer r.Unlock()
-	return r.inVM
+	return r.testLog
 }
 
 func (r *testResult) writeLog(logger *log.Logger, quiet bool, format string, v ...interface{}) {
@@ -94,8 +94,8 @@ func (r *testResult) AppendLog(quiet bool, format string, v ...interface{}) {
 	r.writeLog(r.logLogger, quiet, format, v...)
 }
 
-func (r *testResult) AppendInVM(quiet bool, format string, v ...interface{}) {
-	r.writeLog(r.inVMLogger, quiet, format, v...)
+func (r *testResult) AppendTestLog(quiet bool, format string, v ...interface{}) {
+	r.writeLog(r.testLogger, quiet, format, v...)
 }
 
 func execTests(testRun *TestRun, nrPool chan int) (int, error) {
@@ -203,19 +203,19 @@ func execTests(testRun *TestRun, nrPool chan int) (int, error) {
 				fmt.Print(&testLog)
 
 				if testRun.jenkins.IsActive() {
-					inVM := testRes.InVM()
-					if err := testRun.jenkins.Log(testDirOut, "inVM.log", &inVM); err != nil {
+					testLog := testRes.TestLog()
+					if err := testRun.jenkins.Log(testDirOut, "test.log", &testLog); err != nil {
 						errs.Append(err)
 					}
 
-					xmllog := testRes.InVM()
+					xmllog := testRes.TestLog()
 					if err := testRun.jenkins.XMLLog("test-results", testOut, testRes, &xmllog); err != nil {
 						errs.Append(err)
 					}
 				} else {
-					inVM := testRes.InVM()
-					fmt.Printf("In VM/Test log for %s\n", testOut)
-					fmt.Print(&inVM)
+					testLog := testRes.TestLog()
+					fmt.Printf("Test log for %s\n", testOut)
+					fmt.Print(&testLog)
 				}
 				fmt.Printf("END Results for %s\n", testOut)
 			}(t, to, vms...)
@@ -294,7 +294,7 @@ func execTest(ctx context.Context, testRun *TestRun, test string, to testOption,
 
 	close(testDone)
 
-	res.AppendInVM(true, "%s\n", out)
+	res.AppendTestLog(true, "%s\n", out)
 
 	res.AppendLog(testRun.quiet, "EXECUTIONTIME: %s %v", testInstance, time.Since(start))
 	if testErr != nil { // "real" error or ctx canceled
