@@ -22,7 +22,7 @@ func (vm vmInstance) vmName() string {
 	return fmt.Sprintf("lbtest-vm-%d", vm.nr)
 }
 
-func testIdString(test string, vmCount int, platformIdx int) string {
+func testIDString(test string, vmCount int, platformIdx int) string {
 	return fmt.Sprintf("%s-%d-%d", test, vmCount, platformIdx)
 }
 

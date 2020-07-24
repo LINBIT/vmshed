@@ -68,8 +68,8 @@ func (j *Jenkins) createSubDir(subdir string) (string, error) {
 	return p, os.MkdirAll(p, 0755)
 }
 
-func (j *Jenkins) LogDir(testIdString string) string {
-	return filepath.Join(j.Workspace(), "log", testIdString)
+func (j *Jenkins) LogDir(testIDString string) string {
+	return filepath.Join(j.Workspace(), "log", testIDString)
 }
 
 func (j *Jenkins) CreateFile(subDir string, name string) (*os.File, error) {
