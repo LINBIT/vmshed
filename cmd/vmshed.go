@@ -45,7 +45,6 @@ type TestRun struct {
 	jenkins     *Jenkins
 	nrVMs       int
 	failTest    bool
-	failGrp     bool
 	quiet       bool
 	testTimeout time.Duration
 }
@@ -69,7 +68,6 @@ func rootCommand() *cobra.Command {
 	var startVM int
 	var nrVMs int
 	var failTest bool
-	var failGrp bool
 	var quiet bool
 	var jenkinsWS string
 	var testTimeout time.Duration
@@ -140,7 +138,6 @@ func rootCommand() *cobra.Command {
 				jenkins:     jenkins,
 				nrVMs:       nrVMs,
 				failTest:    failTest,
-				failGrp:     failGrp,
 				quiet:       quiet,
 				testTimeout: testTimeout,
 			}
@@ -165,7 +162,6 @@ func rootCommand() *cobra.Command {
 	rootCmd.Flags().IntVarP(&startVM, "startvm", "", 2, "Number of the first VM to start in parallel")
 	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm")
 	rootCmd.Flags().BoolVarP(&failTest, "failtest", "", false, "Stop executing tests when the first one failed")
-	rootCmd.Flags().BoolVarP(&failGrp, "failgroup", "", false, "Stop executing tests when at least one failed in the test group")
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "", false, "Don't print progess messages while tests are running")
 	rootCmd.Flags().StringVarP(&jenkinsWS, "jenkins", "", "", "If this is set to a path for the current job, text output is saved to files, logs get copied,...")
 	rootCmd.Flags().DurationVarP(&testTimeout, "testtime", "", 5*time.Minute, "Timeout for a single test execution in a VM")

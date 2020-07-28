@@ -262,7 +262,7 @@ func execTests(testRun *TestRun, nrPool chan int) (int, error) {
 					log.Print(string(exitErr.Stderr))
 				}
 			}
-			if testRun.failGrp || testRun.failTest {
+			if testRun.failTest {
 				return overallFailed, errors.New("At least one test in the test group failed, giving up early")
 			}
 		}
