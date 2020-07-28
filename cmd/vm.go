@@ -11,11 +11,15 @@ import (
 type vm struct {
 	BaseImage string            `toml:"base_image"`
 	Values    map[string]string `toml:"values"`
+	Memory    string            `toml:"memory"`
+	VCPUs     uint              `toml:"vcpus"`
 }
 
 type vmInstance struct {
 	ImageName string
 	nr        int
+	memory    string
+	vcpus     uint
 }
 
 func (vm vmInstance) vmName() string {
@@ -125,13 +129,12 @@ func runVM(res *testResult, to testOption, quiet bool, vm vmInstance) error {
 		return err
 	}
 
-	mem := "4G"
 	argv = []string{"virter", "vm", "run",
 		"--name", vmName,
 		"--id", strconv.Itoa(vm.nr),
 		"--console", to.consoleDir,
-		"--memory", mem,
-		"--vcpus", "4",
+		"--memory", vm.memory,
+		"--vcpus", strconv.Itoa(int(vm.vcpus)),
 		"--disk", "name=data,size=2G,bus=scsi",
 		"--wait-ssh",
 		vm.ImageName}

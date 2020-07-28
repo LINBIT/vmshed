@@ -171,9 +171,25 @@ func execTests(testRun *TestRun, nrPool chan int) (int, error) {
 				if err != nil {
 					return 1, err
 				}
+				vm := testRun.vmSpec.VMs[r.Int64()]
+
+				var memory string
+				var vcpus uint
+				if vm.Memory != "" {
+					memory = vm.Memory
+				} else {
+					memory = "4G"
+				}
+				if vm.VCPUs != 0 {
+					vcpus = vm.VCPUs
+				} else {
+					vcpus = 4
+				}
 				v := vmInstance{
-					ImageName: testRun.vmSpec.ImageName(testRun.vmSpec.VMs[r.Int64()]),
+					ImageName: testRun.vmSpec.ImageName(vm),
 					nr:        nr,
+					memory:    memory,
+					vcpus:     vcpus,
 				}
 				vms = append(vms, v)
 			}
