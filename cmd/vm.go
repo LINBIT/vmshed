@@ -96,7 +96,7 @@ func removeImages(vmSpec *vmSpecification) {
 	}
 }
 
-func startVMs(res *testResult, to testOption, quiet bool, testnodes ...vmInstance) error {
+func startVMs(res *testResult, run testRun, quiet bool, testnodes ...vmInstance) error {
 	var vmStartWait sync.WaitGroup
 	errCh := make(chan error, len(testnodes))
 
@@ -104,7 +104,7 @@ func startVMs(res *testResult, to testOption, quiet bool, testnodes ...vmInstanc
 		vmStartWait.Add(1)
 		go func(vm vmInstance) {
 			defer vmStartWait.Done()
-			if err := runVM(res, to, quiet, vm); err != nil {
+			if err := runVM(res, run, quiet, vm); err != nil {
 				errCh <- err
 			}
 		}(vm)
@@ -118,7 +118,7 @@ func startVMs(res *testResult, to testOption, quiet bool, testnodes ...vmInstanc
 	return err
 }
 
-func runVM(res *testResult, to testOption, quiet bool, vm vmInstance) error {
+func runVM(res *testResult, run testRun, quiet bool, vm vmInstance) error {
 	vmName := vm.vmName()
 
 	// clean up, should not be neccessary, but hey...
@@ -132,7 +132,7 @@ func runVM(res *testResult, to testOption, quiet bool, vm vmInstance) error {
 	argv = []string{"virter", "vm", "run",
 		"--name", vmName,
 		"--id", strconv.Itoa(vm.nr),
-		"--console", to.consoleDir,
+		"--console", run.consoleDir,
 		"--memory", vm.memory,
 		"--vcpus", strconv.Itoa(int(vm.vcpus)),
 		"--disk", "name=data,size=2G,bus=scsi",

@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
 	"os/exec"
 	"path"
@@ -37,12 +39,13 @@ type testSpecification struct {
 	TestGroups    []testGroup `toml:"group"`
 }
 
-type TestRun struct {
+type testSuiteRun struct {
 	cmdName     string
 	vmSpec      *vmSpecification
 	testSpec    *testSpecification
 	overrides   []string
 	jenkins     *Jenkins
+	testRuns    []testRun
 	nrVMs       int
 	failTest    bool
 	quiet       bool
@@ -128,20 +131,35 @@ func rootCommand() *cobra.Command {
 			}
 			testSpec.TestGroups = tests
 
+			testRuns, err := determineAllTestRuns(jenkins, &vmSpec, tests)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			for _, run := range testRuns {
+				baseImages := make([]string, len(run.vms))
+				for i, v := range run.vms {
+					baseImages[i] = v.BaseImage
+				}
+				baseImageString := strings.Join(baseImages, ",")
+				log.Printf("WILL RUN: %s with base images %s\n", run.testID, baseImageString)
+			}
+
 			start := time.Now()
 
-			testRun := TestRun{
+			suiteRun := testSuiteRun{
 				cmdName:     cmdName,
 				vmSpec:      &vmSpec,
 				testSpec:    &testSpec,
 				overrides:   provisionOverrides,
 				jenkins:     jenkins,
+				testRuns:    testRuns,
 				nrVMs:       nrVMs,
 				failTest:    failTest,
 				quiet:       quiet,
 				testTimeout: testTimeout,
 			}
-			nFailed := provisionAndExec(&testRun, startVM)
+			nFailed := provisionAndExec(&suiteRun, startVM)
 
 			log.Println(cmdName, "OVERALL EXECUTIONTIME:", time.Since(start))
 
@@ -170,13 +188,104 @@ func rootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func provisionAndExec(testRun *TestRun, startVM int) int {
-	nrPool := make(chan int, testRun.nrVMs)
-	for i := 0; i < testRun.nrVMs; i++ {
+func determineAllTestRuns(jenkins *Jenkins, vmSpec *vmSpecification, testGroups []testGroup) ([]testRun, error) {
+	testRuns := []testRun{}
+	for _, testGrp := range testGroups {
+		for _, t := range testGrp.Tests {
+			runs, err := determineRunsForTest(jenkins, vmSpec, testGrp, t)
+			if err != nil {
+				return nil, err
+			}
+			testRuns = append(testRuns, runs...)
+		}
+	}
+	return testRuns, nil
+}
+
+func determineRunsForTest(jenkins *Jenkins, vmSpec *vmSpecification, testGrp testGroup, testName string) ([]testRun, error) {
+	testRuns := []testRun{}
+
+	needsSameVMs := false
+	for _, s := range testGrp.SameVMs {
+		if s == testName {
+			needsSameVMs = true
+			break
+		}
+	}
+
+	needsAllPlatforms := false
+	for _, a := range testGrp.NeedAllPlatforms {
+		if a == testName {
+			needsAllPlatforms = true
+			break
+		}
+	}
+
+	if needsAllPlatforms {
+		for platformIdx, v := range vmSpec.VMs {
+			testRuns = append(testRuns, newTestRun(
+				jenkins, testName, repeatVM(v, testGrp.NrVMs), platformIdx))
+		}
+	} else if needsSameVMs {
+		v, err := randomVM(vmSpec.VMs)
+		if err != nil {
+			return nil, err
+		}
+		testRuns = append(testRuns, newTestRun(
+			jenkins, testName, repeatVM(v, testGrp.NrVMs), 0))
+	} else {
+		var vms []vm
+		for i := 0; i < testGrp.NrVMs; i++ {
+			v, err := randomVM(vmSpec.VMs)
+			if err != nil {
+				return nil, err
+			}
+			vms = append(vms, v)
+		}
+		testRuns = append(testRuns, newTestRun(jenkins, testName, vms, 0))
+	}
+
+	return testRuns, nil
+}
+
+func repeatVM(v vm, count int) []vm {
+	vms := make([]vm, count)
+	for i := 0; i < count; i++ {
+		vms[i] = v
+	}
+	return vms
+}
+
+func randomVM(vms []vm) (vm, error) {
+	r, err := rand.Int(rand.Reader, big.NewInt(int64(len(vms))))
+	if err != nil {
+		return vm{}, err
+	}
+	return vms[r.Int64()], nil
+}
+
+func newTestRun(jenkins *Jenkins, testName string, vms []vm, platformIdx int) testRun {
+	run := testRun{
+		testName: testName,
+		testID:   testIDString(testName, len(vms), platformIdx),
+		vms:      vms,
+	}
+
+	if jenkins.IsActive() {
+		run.testDirOut = filepath.Join("log", run.testID)
+		run.consoleDir = jenkins.SubDir(run.testDirOut)
+	}
+
+	return run
+}
+
+func provisionAndExec(suiteRun *testSuiteRun, startVM int) int {
+	nrPool := make(chan int, suiteRun.nrVMs)
+	for i := 0; i < suiteRun.nrVMs; i++ {
 		nr := i + startVM
 		nrPool <- nr
 
-		lockName := fmt.Sprintf("%s.vm-%d.lock", testRun.cmdName, nr)
+		lockName := fmt.Sprintf("%s.vm-%d.lock", suiteRun.cmdName, nr)
 		lock, err := lockfile.New(filepath.Join(os.TempDir(), lockName))
 		if err != nil {
 			log.Fatalf("Cannot init lock. reason: %v", err)
@@ -199,9 +308,9 @@ func provisionAndExec(testRun *TestRun, startVM int) int {
 		log.Fatalf("ERROR: %v", err)
 	}
 
-	if testRun.vmSpec.ProvisionFile != "" {
-		defer removeImages(testRun.vmSpec)
-		if err := provisionImages(testRun.vmSpec, testRun.overrides, startVM); err != nil {
+	if suiteRun.vmSpec.ProvisionFile != "" {
+		defer removeImages(suiteRun.vmSpec)
+		if err := provisionImages(suiteRun.vmSpec, suiteRun.overrides, startVM); err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				log.Print(string(exitErr.Stderr))
 			}
@@ -209,28 +318,11 @@ func provisionAndExec(testRun *TestRun, startVM int) int {
 		}
 	}
 
-	nFailed, err := execTests(testRun, nrPool)
+	nFailed, err := execTests(suiteRun, nrPool)
 	if err != nil {
 		log.Printf("ERROR: %v", err)
 	}
 	return nFailed
-}
-
-func finalVMs(vmSpec *vmSpecification, to testOption, origTestnodes ...vmInstance) ([]vmInstance, error) {
-	testnodes := origTestnodes
-
-	if to.needsSameVMs {
-		for i := range testnodes {
-			testnodes[i].ImageName = testnodes[0].ImageName
-		}
-	} else if to.needsAllPlatforms { // this only includes the nodes under test
-		oneVM := vmSpec.VMs[to.platformIdx]
-		for i := range testnodes {
-			testnodes[i].ImageName = vmSpec.ImageName(oneVM)
-		}
-	}
-
-	return testnodes, nil
 }
 
 func ctxCancled(ctx context.Context) bool {
