@@ -2,4 +2,6 @@ name = "example"
 provision_file = "test-run-provision.virter.toml"
 
 [[vms]]
+vcpus = 2
+memory = "6G"
 base_image = "centos-7"
