@@ -46,6 +46,7 @@ type testSuiteRun struct {
 	overrides   []string
 	jenkins     *Jenkins
 	testRuns    []testRun
+	startVM     int
 	nrVMs       int
 	failTest    bool
 	quiet       bool
@@ -154,6 +155,7 @@ func rootCommand() *cobra.Command {
 				overrides:   provisionOverrides,
 				jenkins:     jenkins,
 				testRuns:    testRuns,
+				startVM:     startVM,
 				nrVMs:       nrVMs,
 				failTest:    failTest,
 				quiet:       quiet,
@@ -280,10 +282,8 @@ func newTestRun(jenkins *Jenkins, testName string, vms []vm, platformIdx int) te
 }
 
 func provisionAndExec(suiteRun *testSuiteRun, startVM int) int {
-	nrPool := make(chan int, suiteRun.nrVMs)
 	for i := 0; i < suiteRun.nrVMs; i++ {
 		nr := i + startVM
-		nrPool <- nr
 
 		lockName := fmt.Sprintf("%s.vm-%d.lock", suiteRun.cmdName, nr)
 		lock, err := lockfile.New(filepath.Join(os.TempDir(), lockName))
@@ -318,7 +318,7 @@ func provisionAndExec(suiteRun *testSuiteRun, startVM int) int {
 		}
 	}
 
-	nFailed, err := execTests(suiteRun, nrPool)
+	nFailed, err := execTests(suiteRun)
 	if err != nil {
 		log.Printf("ERROR: %v", err)
 	}
