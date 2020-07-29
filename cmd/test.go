@@ -198,14 +198,19 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, testnode
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 
-	testDone := make(chan struct{})
-	go handleTestTermination(ctx, cmd, testDone, res, suiteRun.quiet)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	testErr := cmd.Start()
+	if testErr == nil {
+		testDone := make(chan struct{})
+		// The termination handler must be started after cmd.Start()
+		go handleTestTermination(ctx, cmd, testDone, res, suiteRun.quiet)
+		testErr = cmd.Wait()
+		close(testDone)
+	}
 
-	out, testErr := cmd.CombinedOutput()
-
-	close(testDone)
-
-	res.AppendTestLog(true, "%s\n", out)
+	res.AppendTestLog(true, "%s\n", out.Bytes())
 
 	res.AppendLog(suiteRun.quiet, "EXECUTIONTIME: %s %v", run.testID, time.Since(start))
 	if testErr != nil { // "real" error or ctx canceled
