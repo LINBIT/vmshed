@@ -69,6 +69,7 @@ func rootCommand() *cobra.Command {
 	var provisionOverrides []string
 	var baseImages []string
 	var toRun string
+	var repeats int
 	var startVM int
 	var nrVMs int
 	var failTest bool
@@ -132,7 +133,7 @@ func rootCommand() *cobra.Command {
 			}
 			testSpec.TestGroups = tests
 
-			testRuns, err := determineAllTestRuns(jenkins, &vmSpec, tests)
+			testRuns, err := determineAllTestRuns(jenkins, &vmSpec, tests, repeats)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -179,6 +180,7 @@ func rootCommand() *cobra.Command {
 	rootCmd.Flags().StringSliceVarP(&provisionOverrides, "set", "s", []string{}, "set/override provisioning steps, for example '--set values.X=y'")
 	rootCmd.Flags().StringSliceVarP(&baseImages, "base-image", "", []string{}, "VM base images to use (defaults to all)")
 	rootCmd.Flags().StringVarP(&toRun, "torun", "", "all", "comma separated list of test names to execute ('all' is a reserved test name)")
+	rootCmd.Flags().IntVarP(&repeats, "repeats", "", 1, "number of times to repeat each test, expecting success on every attempt")
 	rootCmd.Flags().IntVarP(&startVM, "startvm", "", 2, "Number of the first VM to start in parallel")
 	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm")
 	rootCmd.Flags().BoolVarP(&failTest, "failtest", "", false, "Stop executing tests when the first one failed")
@@ -190,11 +192,11 @@ func rootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func determineAllTestRuns(jenkins *Jenkins, vmSpec *vmSpecification, testGroups []testGroup) ([]testRun, error) {
+func determineAllTestRuns(jenkins *Jenkins, vmSpec *vmSpecification, testGroups []testGroup, repeats int) ([]testRun, error) {
 	testRuns := []testRun{}
 	for _, testGrp := range testGroups {
 		for _, t := range testGrp.Tests {
-			runs, err := determineRunsForTest(jenkins, vmSpec, testGrp, t)
+			runs, err := determineRunsForTest(jenkins, vmSpec, testGrp, t, repeats)
 			if err != nil {
 				return nil, err
 			}
@@ -204,7 +206,7 @@ func determineAllTestRuns(jenkins *Jenkins, vmSpec *vmSpecification, testGroups 
 	return testRuns, nil
 }
 
-func determineRunsForTest(jenkins *Jenkins, vmSpec *vmSpecification, testGrp testGroup, testName string) ([]testRun, error) {
+func determineRunsForTest(jenkins *Jenkins, vmSpec *vmSpecification, testGrp testGroup, testName string, repeats int) ([]testRun, error) {
 	testRuns := []testRun{}
 
 	needsSameVMs := false
@@ -223,28 +225,30 @@ func determineRunsForTest(jenkins *Jenkins, vmSpec *vmSpecification, testGrp tes
 		}
 	}
 
-	if needsAllPlatforms {
-		for platformIdx, v := range vmSpec.VMs {
-			testRuns = append(testRuns, newTestRun(
-				jenkins, testName, repeatVM(v, testGrp.NrVMs), platformIdx))
-		}
-	} else if needsSameVMs {
-		v, err := randomVM(vmSpec.VMs)
-		if err != nil {
-			return nil, err
-		}
-		testRuns = append(testRuns, newTestRun(
-			jenkins, testName, repeatVM(v, testGrp.NrVMs), 0))
-	} else {
-		var vms []vm
-		for i := 0; i < testGrp.NrVMs; i++ {
+	for repeatCounter := 0; repeatCounter < repeats; repeatCounter++ {
+		if needsAllPlatforms {
+			for _, v := range vmSpec.VMs {
+				testRuns = append(testRuns, newTestRun(
+					jenkins, testName, repeatVM(v, testGrp.NrVMs), len(testRuns)))
+			}
+		} else if needsSameVMs {
 			v, err := randomVM(vmSpec.VMs)
 			if err != nil {
 				return nil, err
 			}
-			vms = append(vms, v)
+			testRuns = append(testRuns, newTestRun(
+				jenkins, testName, repeatVM(v, testGrp.NrVMs), len(testRuns)))
+		} else {
+			var vms []vm
+			for i := 0; i < testGrp.NrVMs; i++ {
+				v, err := randomVM(vmSpec.VMs)
+				if err != nil {
+					return nil, err
+				}
+				vms = append(vms, v)
+			}
+			testRuns = append(testRuns, newTestRun(jenkins, testName, vms, len(testRuns)))
 		}
-		testRuns = append(testRuns, newTestRun(jenkins, testName, vms, 0))
 	}
 
 	return testRuns, nil
@@ -266,10 +270,10 @@ func randomVM(vms []vm) (vm, error) {
 	return vms[r.Int64()], nil
 }
 
-func newTestRun(jenkins *Jenkins, testName string, vms []vm, platformIdx int) testRun {
+func newTestRun(jenkins *Jenkins, testName string, vms []vm, testIndex int) testRun {
 	run := testRun{
 		testName: testName,
-		testID:   testIDString(testName, len(vms), platformIdx),
+		testID:   testIDString(testName, len(vms), testIndex),
 		vms:      vms,
 	}
 
