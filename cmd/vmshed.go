@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -95,7 +96,10 @@ func rootCommand() *cobra.Command {
 				log.Fatal(cmdName, "--nvms has to be positive")
 			}
 
-			jenkins := NewJenkinsMust(jenkinsWS)
+			jenkins, err := NewJenkins(jenkinsWS)
+			if err != nil {
+				log.Fatal(err)
+			}
 
 			var vmSpec vmSpecification
 			if _, err := toml.DecodeFile(vmSpecPath, &vmSpec); err != nil {
@@ -162,7 +166,15 @@ func rootCommand() *cobra.Command {
 				quiet:       quiet,
 				testTimeout: testTimeout,
 			}
-			nFailed := provisionAndExec(&suiteRun, startVM)
+			nFailed, err := provisionAndExec(&suiteRun, startVM)
+			if err != nil {
+				log.Printf("ERROR: %v\n", err)
+				for wrappedErr := err; wrappedErr != nil; wrappedErr = errors.Unwrap(wrappedErr) {
+					if exitErr, ok := wrappedErr.(*exec.ExitError); ok {
+						log.Printf("ERROR DETAILS: stderr from '%v':\n%s", wrappedErr, string(exitErr.Stderr))
+					}
+				}
+			}
 
 			log.Println(cmdName, "OVERALL EXECUTIONTIME:", time.Since(start))
 
@@ -285,17 +297,17 @@ func newTestRun(jenkins *Jenkins, testName string, vms []vm, testIndex int) test
 	return run
 }
 
-func provisionAndExec(suiteRun *testSuiteRun, startVM int) int {
+func provisionAndExec(suiteRun *testSuiteRun, startVM int) (int, error) {
 	for i := 0; i < suiteRun.nrVMs; i++ {
 		nr := i + startVM
 
 		lockName := fmt.Sprintf("%s.vm-%d.lock", suiteRun.cmdName, nr)
 		lock, err := lockfile.New(filepath.Join(os.TempDir(), lockName))
 		if err != nil {
-			log.Fatalf("Cannot init lock. reason: %v", err)
+			return 1, fmt.Errorf("cannot init lock. reason: %w", err)
 		}
 		if err = lock.TryLock(); err != nil {
-			log.Fatalf("Cannot lock %q, reason: %v", lock, err)
+			return 1, fmt.Errorf("cannot lock %q, reason: %w", lock, err)
 		}
 		defer lock.Unlock()
 	}
@@ -305,28 +317,27 @@ func provisionAndExec(suiteRun *testSuiteRun, startVM int) int {
 	// The result is that the VMs start successfully, but then the test can
 	// only connect to one of them. Each VM has been provided a different
 	// key, but the test only has the key that was written last.
-	log.Println("Initialize virter")
+	log.Println("STAGE: Initialize virter")
 	argv := []string{"virter", "image", "ls", "--available"}
 	log.Printf("EXECUTING: %s", argv)
 	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
-		log.Fatalf("ERROR: %v", err)
+		return 1, fmt.Errorf("cannot initialize virter: %w", err)
 	}
 
 	if suiteRun.vmSpec.ProvisionFile != "" {
+		log.Println("STAGE: Provision test images")
 		defer removeImages(suiteRun.vmSpec)
 		if err := provisionImages(suiteRun.vmSpec, suiteRun.overrides, startVM); err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				log.Print(string(exitErr.Stderr))
-			}
-			log.Fatal(err)
+			return 1, fmt.Errorf("cannot provision images: %w", err)
 		}
 	}
 
+	log.Println("STAGE: Execute tests")
 	nFailed, err := execTests(suiteRun)
 	if err != nil {
-		log.Printf("ERROR: %v", err)
+		return 1, fmt.Errorf("cannot execute tests: %w", err)
 	}
-	return nFailed
+	return nFailed, nil
 }
 
 func ctxCancled(ctx context.Context) bool {

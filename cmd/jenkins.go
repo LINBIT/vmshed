@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -38,17 +37,14 @@ func checkWorkspacePath(path string) error {
 
 // NewJenkins initializes a new Jenkins object and assiciates a Jenkins workspace with the object.
 // An empty workspace string disables other functionality.
-func NewJenkinsMust(workspacePath string) *Jenkins {
-
+func NewJenkins(workspacePath string) (*Jenkins, error) {
 	if workspacePath != "" {
 		if err := checkWorkspacePath(workspacePath); err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 	}
 
-	return &Jenkins{
-		wsPath: workspacePath,
-	}
+	return &Jenkins{wsPath: workspacePath}, nil
 }
 
 // IsActive returnes true if a workspace path is set, otherwise false.
