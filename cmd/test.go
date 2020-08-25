@@ -5,8 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,11 +23,10 @@ type testGroup struct {
 }
 
 type testRun struct {
-	testName   string
-	testID     string
-	testDirOut string
-	consoleDir string
-	vms        []vm
+	testName string
+	testID   string
+	outDir   string
+	vms      []vm
 }
 
 type TestResulter interface {
@@ -51,6 +52,13 @@ func (r *testResult) Err() error {
 }
 
 func performTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, ids []int) (string, error) {
+	if run.outDir != "" {
+		err := os.MkdirAll(run.outDir, 0755)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	var vms []vmInstance
 	for i, vm := range run.vms {
 		var memory string
@@ -81,8 +89,9 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, ids [
 
 	fmt.Fprintln(&report, "|===================================================================================================")
 	fmt.Fprintf(&report, "| ** Results for %s - %s\n", run.testID, testStateString(testRes.err))
-	if suiteRun.jenkins.IsActive() {
-		fmt.Fprintf(&report, "| ** %s/artifact/%s\n", os.Getenv("BUILD_URL"), run.testDirOut)
+	jobURL := os.Getenv("CI_JOB_URL")
+	if jobURL != "" {
+		fmt.Fprintf(&report, "| ** %s/artifacts/browse/%s\n", jobURL, run.outDir)
 	}
 	fmt.Fprintln(&report, "|===================================================================================================")
 	logLines := strings.Split(strings.TrimSpace(testRes.log.String()), "\n")
@@ -92,7 +101,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, ids [
 
 	testLog := testRes.testLog.Bytes()
 	if suiteRun.jenkins.IsActive() {
-		if err := suiteRun.jenkins.Log(run.testDirOut, "test.log", testLog); err != nil {
+		if err := ioutil.WriteFile(filepath.Join(run.outDir, "test.log"), testLog, 0644); err != nil {
 			fmt.Fprintf(&report, "| FAILED to write log; suppressing original error: %v\n", testErr)
 			testErr = err
 		}

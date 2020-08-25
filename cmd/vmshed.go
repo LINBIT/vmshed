@@ -285,8 +285,7 @@ func newTestRun(jenkins *Jenkins, testName string, vms []vm, testIndex int) test
 	}
 
 	if jenkins.IsActive() {
-		run.testDirOut = filepath.Join("log", run.testID)
-		run.consoleDir = jenkins.SubDir(run.testDirOut)
+		run.outDir = jenkins.SubDir(filepath.Join("log", run.testID))
 	}
 
 	return run

@@ -133,7 +133,7 @@ func runVM(logger *log.Logger, run testRun, vm vmInstance) error {
 	argv = []string{"virter", "vm", "run",
 		"--name", vmName,
 		"--id", strconv.Itoa(vm.nr),
-		"--console", run.consoleDir,
+		"--console", run.outDir,
 		"--memory", vm.memory,
 		"--vcpus", strconv.Itoa(int(vm.vcpus)),
 		"--disk", "name=data,size=2G,bus=scsi",

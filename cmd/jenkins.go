@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,9 +13,6 @@ type Jenkins struct {
 }
 
 func checkWorkspacePath(path string) error {
-	if !filepath.IsAbs(path) {
-		return fmt.Errorf("'%s' is not an absolute path", path)
-	}
 	if st, err := os.Stat(path); err != nil {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("Could not stat %s: %v", path, err)
@@ -45,8 +41,9 @@ func NewJenkins(workspacePath string) (*Jenkins, error) {
 }
 
 // IsActive returnes true if a workspace path is set, otherwise false.
-func (j *Jenkins) Workspace() string { return j.wsPath }
-func (j *Jenkins) IsActive() bool    { return j.Workspace() != "" }
+func (j *Jenkins) IsActive() bool {
+	return j.wsPath != ""
+}
 
 func (j *Jenkins) SubDir(subdir string) string {
 	return filepath.Join(j.wsPath, subdir)
@@ -63,29 +60,6 @@ func (j *Jenkins) createSubDir(subdir string) (string, error) {
 	}
 
 	return p, os.MkdirAll(p, 0755)
-}
-
-func (j *Jenkins) LogDir(testIDString string) string {
-	return filepath.Join(j.Workspace(), "log", testIDString)
-}
-
-func (j *Jenkins) CreateFile(subDir string, name string) (*os.File, error) {
-	p, err := j.createSubDir(subDir)
-	if err != nil {
-		return nil, err
-	}
-
-	return os.Create(filepath.Join(p, name))
-}
-
-// Log writes an arbitrary log file, where "subDir" is a subdirectory in the Jenkins workspace, and "name" is the name of the file to write to.
-func (j *Jenkins) Log(subDir, name string, testLog []byte) error {
-	p, err := j.createSubDir(subDir)
-	if err != nil {
-		return err
-	}
-
-	return ioutil.WriteFile(filepath.Join(p, name), testLog, 0644)
 }
 
 func (j *Jenkins) XMLLog(restultsDir, testName string, testRes TestResulter, testLog []byte) error {
