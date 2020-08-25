@@ -178,12 +178,6 @@ func rootCommand() *cobra.Command {
 			}
 
 			log.Println("OVERALL EXECUTIONTIME:", time.Since(start))
-
-			// transfer ownership to Jenkins, so that the workspace can be cleaned before running again
-			if err := jenkins.OwnWorkspace(); err != nil {
-				log.Println("ERROR SETTING WORKSPACE OWNERSHIP:", err)
-			}
-
 			os.Exit(nFailed)
 		},
 	}

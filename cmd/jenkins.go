@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/user"
 	"path/filepath"
 	"regexp"
-	"strconv"
 )
 
 type Jenkins struct {
@@ -122,38 +120,4 @@ func (j *Jenkins) XMLLog(restultsDir, testName string, testRes TestResulter, tes
 	f.WriteString("</testcase></testsuite>")
 
 	return nil
-}
-
-func chmodR(path, username string) error {
-	u, err := user.Lookup(username)
-	if err != nil {
-		return err
-	}
-
-	uid, err := strconv.Atoi(u.Uid)
-	if err != nil {
-		return err
-	}
-	gid, err := strconv.Atoi(u.Gid)
-	if err != nil {
-		return err
-	}
-
-	return filepath.Walk(path, func(name string, info os.FileInfo, err error) error {
-		if err == nil {
-			err = os.Chown(name, uid, gid)
-		}
-		return err
-	})
-}
-
-func (j *Jenkins) setOwner(path string) error {
-	return chmodR(path, "jenkins")
-}
-
-func (j *Jenkins) OwnWorkspace() error {
-	if !j.IsActive() {
-		return nil
-	}
-	return j.setOwner(j.wsPath)
 }
