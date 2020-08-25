@@ -1,5 +1,6 @@
 name = "example"
 provision_file = "test-run-provision.virter.toml"
+provision_timeout = "40s"
 
 [[vms]]
 vcpus = 2

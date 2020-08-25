@@ -2,17 +2,19 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 )
 
 type suiteState struct {
-	remainingRuns map[string]bool
-	freeIDs       map[int]bool
-	errors        []error
+	remainingRuns     map[string]bool
+	remainingImages   map[string]bool
+	provisionedImages map[string]bool
+	freeIDs           map[int]bool
+	errors            []error
 }
 
 type action struct {
@@ -28,18 +30,21 @@ type result struct {
 	apply func(state *suiteState)
 }
 
-func execTests(suiteRun *testSuiteRun) (int, error) {
+func runScheduler(suiteRun *testSuiteRun) (int, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	start := time.Now()
-
 	state := suiteState{
-		remainingRuns: make(map[string]bool),
-		freeIDs:       make(map[int]bool, suiteRun.nrVMs),
+		remainingRuns:     make(map[string]bool),
+		remainingImages:   make(map[string]bool),
+		provisionedImages: make(map[string]bool),
+		freeIDs:           make(map[int]bool, suiteRun.nrVMs),
 	}
 	for _, run := range suiteRun.testRuns {
 		state.remainingRuns[run.testID] = true
+	}
+	for _, v := range suiteRun.vmSpec.VMs {
+		state.remainingImages[v.BaseImage] = true
 	}
 	for i := 0; i < suiteRun.nrVMs; i++ {
 		state.freeIDs[suiteRun.startVM+i] = true
@@ -47,18 +52,14 @@ func execTests(suiteRun *testSuiteRun) (int, error) {
 
 	scheduleLoop(ctx, cancel, suiteRun, &state)
 
-	log.Println("EXECUTIONTIME: All tests:", time.Since(start))
-
 	nErrs := len(state.errors)
 	if nErrs == 0 {
 		log.Println("STATUS: All tests succeeded!")
 	} else {
-		log.Warnln("ERROR: Printing errors for all tests")
+		log.Warnln("ERROR: Printing all errors")
 		for i, err := range state.errors {
 			log.Warnf("ERROR %d: %s", i, err)
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				log.Print(string(exitErr.Stderr))
-			}
+			unwrapStderr(err)
 		}
 	}
 	return nErrs, nil
@@ -108,15 +109,39 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) *action {
 		return nil
 	}
 
+	var neededVM *vm
 	var bestRun *testRun
+
 	for _, run := range suiteRun.testRuns {
-		canRun := state.remainingRuns[run.testID] && len(state.freeIDs) >= len(run.vms)
+		if !state.remainingRuns[run.testID] {
+			continue
+		}
+
+		if suiteRun.vmSpec.ProvisionFile != "" {
+			haveImages := true
+			for _, v := range run.vms {
+				if !state.provisionedImages[v.BaseImage] {
+					if state.remainingImages[v.BaseImage] {
+						vCopy := v
+						neededVM = &vCopy
+					}
+					haveImages = false
+				}
+			}
+			if !haveImages {
+				continue
+			}
+		}
+
+		if len(state.freeIDs) < len(run.vms) {
+			continue
+		}
 
 		// Prefer runs that use more VMs because that will generally
 		// use the available IDs more efficiently
 		betterRun := bestRun == nil || len(run.vms) > len(bestRun.vms)
 
-		if canRun && betterRun {
+		if betterRun {
 			runCopy := run
 			bestRun = &runCopy
 		}
@@ -126,6 +151,12 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) *action {
 		delete(state.remainingRuns, bestRun.testID)
 		ids := popN(state.freeIDs, len(bestRun.vms))
 		return performTestAction(*bestRun, ids)
+	}
+
+	if neededVM != nil && len(state.freeIDs) > 0 {
+		delete(state.remainingImages, neededVM.BaseImage)
+		ids := popN(state.freeIDs, 1)
+		return provisionImageAction(neededVM, ids[0])
 	}
 
 	return nil
@@ -160,5 +191,33 @@ func performTestAction(run testRun, ids []int) *action {
 				},
 			}
 		},
+	}
+}
+
+func provisionImageAction(v *vm, id int) *action {
+	return &action{
+		name: fmt.Sprintf("Provision image %s with ID %d", v.BaseImage, id),
+		exec: func(ctx context.Context, suiteRun *testSuiteRun) result {
+			err := provisionImage(suiteRun.vmSpec, suiteRun.overrides, id, v)
+			return result{
+				apply: func(state *suiteState) {
+					state.freeIDs[id] = true
+					if err == nil {
+						state.provisionedImages[v.BaseImage] = true
+					} else {
+						state.errors = append(state.errors,
+							fmt.Errorf("provision %s: %w", v.BaseImage, err))
+					}
+				},
+			}
+		},
+	}
+}
+
+func unwrapStderr(err error) {
+	for wrappedErr := err; wrappedErr != nil; wrappedErr = errors.Unwrap(wrappedErr) {
+		if exitErr, ok := wrappedErr.(*exec.ExitError); ok {
+			log.Warnf("ERROR DETAILS: stderr:\n%s", string(exitErr.Stderr))
+		}
 	}
 }

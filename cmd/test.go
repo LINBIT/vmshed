@@ -60,26 +60,26 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, ids [
 	}
 
 	var vms []vmInstance
-	for i, vm := range run.vms {
+	for i, v := range run.vms {
 		var memory string
 		var vcpus uint
-		if vm.Memory != "" {
-			memory = vm.Memory
+		if v.Memory != "" {
+			memory = v.Memory
 		} else {
 			memory = "4G"
 		}
-		if vm.VCPUs != 0 {
-			vcpus = vm.VCPUs
+		if v.VCPUs != 0 {
+			vcpus = v.VCPUs
 		} else {
 			vcpus = 4
 		}
-		v := vmInstance{
-			ImageName: suiteRun.vmSpec.ImageName(vm),
+		instance := vmInstance{
+			ImageName: suiteRun.vmSpec.ImageName(&v),
 			nr:        ids[i],
 			memory:    memory,
 			vcpus:     vcpus,
 		}
-		vms = append(vms, v)
+		vms = append(vms, instance)
 	}
 
 	testRes := execTest(ctx, suiteRun, run, vms...)
@@ -157,50 +157,30 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, testnode
 		argv = append(argv, vm.vmName())
 	}
 
-	logger.Printf("EXECUTING TEST: %s", argv)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stderr = &res.testLog
 
-	start = time.Now()
-
-	ctx, cancel := context.WithTimeout(ctx, suiteRun.testTimeout)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(suiteRun.testSpec.TestTimeout))
 	defer cancel()
 
-	cmd := exec.Command(argv[0], argv[1:]...)
+	logger.Printf("EXECUTING TEST: %s", argv)
+	start = time.Now()
+	testErr := cmdRunTerm(ctx, logger, cmd)
+	logger.Printf("EXECUTIONTIME: Running test %s: %v", run.testID, time.Since(start))
 
-	cmd.Stdout = &res.testLog
-	cmd.Stderr = &res.testLog
-	testErr := cmd.Start()
-	if testErr == nil {
-		testDone := make(chan struct{})
-		// The termination handler must be started after cmd.Start()
-		go handleTestTermination(ctx, logger, cmd, testDone)
-		testErr = cmd.Wait()
-		close(testDone)
+	if exitErr, ok := testErr.(*exec.ExitError); ok {
+		exitErr.Stderr = res.testLog.Bytes()
 	}
 
-	logger.Printf("EXECUTIONTIME: Running test %s: %v", run.testID, time.Since(start))
 	if testErr != nil { // "real" error or ctx canceled
-		res.err = fmt.Errorf("%s: %v", run.testID, testErr)
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			res.err = fmt.Errorf("%v %v", res.err, ctxErr)
+			res.err = fmt.Errorf("%s: (context error: %v): %w", run.testID, ctxErr, testErr)
+		} else {
+			res.err = fmt.Errorf("%s: %w", run.testID, testErr)
 		}
 	}
 
 	return &res
-}
-
-func handleTestTermination(ctx context.Context, logger *log.Logger, cmd *exec.Cmd, done <-chan struct{}) {
-	select {
-	case <-ctx.Done():
-		logger.Warnln("TERMINATING test with SIGINT")
-		cmd.Process.Signal(os.Interrupt)
-		select {
-		case <-time.After(10 * time.Second):
-			logger.Errorln("WARNING! TERMINATING test with SIGKILL")
-			cmd.Process.Kill()
-		case <-done:
-		}
-	case <-done:
-	}
 }
 
 func testLogger(out io.Writer, quiet bool) *log.Logger {

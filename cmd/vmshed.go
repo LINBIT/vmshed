@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -21,13 +20,32 @@ import (
 	"github.com/LINBIT/vmshed/cmd/config"
 )
 
-type vmSpecification struct {
-	Name          string `toml:"name"`
-	ProvisionFile string `toml:"provision_file"`
-	VMs           []vm   `toml:"vms"`
+type duration time.Duration
+
+func (d *duration) UnmarshalText(text []byte) error {
+	timeDuration, err := time.ParseDuration(string(text))
+	if err != nil {
+		return err
+	}
+	*d = duration(timeDuration)
+	return nil
 }
 
-func (s *vmSpecification) ImageName(v vm) string {
+func durationDefault(d duration, fallback time.Duration) duration {
+	if d == 0 {
+		return duration(fallback)
+	}
+	return d
+}
+
+type vmSpecification struct {
+	Name             string   `toml:"name"`
+	ProvisionFile    string   `toml:"provision_file"`
+	ProvisionTimeout duration `toml:"provision_timeout"`
+	VMs              []vm     `toml:"vms"`
+}
+
+func (s *vmSpecification) ImageName(v *vm) string {
 	if s.ProvisionFile == "" {
 		// No provisioning, use base image directly
 		return v.BaseImage
@@ -37,20 +55,20 @@ func (s *vmSpecification) ImageName(v vm) string {
 
 type testSpecification struct {
 	TestSuiteFile string      `toml:"test_suite_file"`
+	TestTimeout   duration    `toml:"test_timeout"`
 	TestGroups    []testGroup `toml:"group"`
 }
 
 type testSuiteRun struct {
-	vmSpec      *vmSpecification
-	testSpec    *testSpecification
-	overrides   []string
-	jenkins     *Jenkins
-	testRuns    []testRun
-	startVM     int
-	nrVMs       int
-	failTest    bool
-	quiet       bool
-	testTimeout time.Duration
+	vmSpec    *vmSpecification
+	testSpec  *testSpecification
+	overrides []string
+	jenkins   *Jenkins
+	testRuns  []testRun
+	startVM   int
+	nrVMs     int
+	failTest  bool
+	quiet     bool
 }
 
 // Execute runs vmshed
@@ -78,7 +96,6 @@ func rootCommand() *cobra.Command {
 	var failTest bool
 	var quiet bool
 	var jenkinsWS string
-	var testTimeout time.Duration
 	var version bool
 
 	rootCmd := &cobra.Command{
@@ -108,6 +125,7 @@ func rootCommand() *cobra.Command {
 				log.Fatal(err)
 			}
 			vmSpec.ProvisionFile = joinIfRel(filepath.Dir(vmSpecPath), vmSpec.ProvisionFile)
+			vmSpec.ProvisionTimeout = durationDefault(vmSpec.ProvisionTimeout, 3*time.Minute)
 			vmSpec.VMs = filterVMs(vmSpec.VMs, baseImages)
 
 			var testSpec testSpecification
@@ -115,6 +133,7 @@ func rootCommand() *cobra.Command {
 				log.Fatal(err)
 			}
 			testSpec.TestSuiteFile = joinIfRel(filepath.Dir(testSpecPath), testSpec.TestSuiteFile)
+			testSpec.TestTimeout = durationDefault(testSpec.TestTimeout, 5*time.Minute)
 
 			var tests []testGroup
 			for _, test := range testSpec.TestGroups {
@@ -156,25 +175,20 @@ func rootCommand() *cobra.Command {
 			start := time.Now()
 
 			suiteRun := testSuiteRun{
-				vmSpec:      &vmSpec,
-				testSpec:    &testSpec,
-				overrides:   provisionOverrides,
-				jenkins:     jenkins,
-				testRuns:    testRuns,
-				startVM:     startVM,
-				nrVMs:       nrVMs,
-				failTest:    failTest,
-				quiet:       quiet,
-				testTimeout: testTimeout,
+				vmSpec:    &vmSpec,
+				testSpec:  &testSpec,
+				overrides: provisionOverrides,
+				jenkins:   jenkins,
+				testRuns:  testRuns,
+				startVM:   startVM,
+				nrVMs:     nrVMs,
+				failTest:  failTest,
+				quiet:     quiet,
 			}
-			nFailed, err := provisionAndExec(filepath.Base(os.Args[0]), &suiteRun, startVM)
+			nFailed, err := provisionAndExec(filepath.Base(os.Args[0]), &suiteRun)
 			if err != nil {
 				log.Errorf("ERROR: %v", err)
-				for wrappedErr := err; wrappedErr != nil; wrappedErr = errors.Unwrap(wrappedErr) {
-					if exitErr, ok := wrappedErr.(*exec.ExitError); ok {
-						log.Errorf("ERROR DETAILS: stderr from '%v':\n%s", wrappedErr, string(exitErr.Stderr))
-					}
-				}
+				unwrapStderr(err)
 			}
 
 			log.Println("OVERALL EXECUTIONTIME:", time.Since(start))
@@ -193,7 +207,6 @@ func rootCommand() *cobra.Command {
 	rootCmd.Flags().BoolVarP(&failTest, "failtest", "", false, "Stop executing tests when the first one failed")
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "", false, "Don't print progess messages while tests are running")
 	rootCmd.Flags().StringVarP(&jenkinsWS, "jenkins", "", "", "If this is set to a path for the current job, text output is saved to files, logs get copied,...")
-	rootCmd.Flags().DurationVarP(&testTimeout, "testtime", "", 5*time.Minute, "Timeout for a single test execution in a VM")
 	rootCmd.Flags().BoolVarP(&version, "version", "", false, "Print version and exit")
 
 	return rootCmd
@@ -291,9 +304,9 @@ func newTestRun(jenkins *Jenkins, testName string, vms []vm, testIndex int) test
 	return run
 }
 
-func provisionAndExec(cmdName string, suiteRun *testSuiteRun, startVM int) (int, error) {
+func provisionAndExec(cmdName string, suiteRun *testSuiteRun) (int, error) {
 	for i := 0; i < suiteRun.nrVMs; i++ {
-		nr := i + startVM
+		nr := i + suiteRun.startVM
 
 		lockName := fmt.Sprintf("%s.vm-%d.lock", cmdName, nr)
 		lock, err := lockfile.New(filepath.Join(os.TempDir(), lockName))
@@ -318,16 +331,10 @@ func provisionAndExec(cmdName string, suiteRun *testSuiteRun, startVM int) (int,
 		return 1, fmt.Errorf("cannot initialize virter: %w", err)
 	}
 
-	if suiteRun.vmSpec.ProvisionFile != "" {
-		log.Println("STAGE: Provision test images")
-		defer removeImages(suiteRun.vmSpec)
-		if err := provisionImages(suiteRun.vmSpec, suiteRun.overrides, startVM); err != nil {
-			return 1, fmt.Errorf("cannot provision images: %w", err)
-		}
-	}
+	defer removeImages(suiteRun.vmSpec)
 
-	log.Println("STAGE: Execute tests")
-	nFailed, err := execTests(suiteRun)
+	log.Println("STAGE: Scheduler")
+	nFailed, err := runScheduler(suiteRun)
 	if err != nil {
 		return 1, fmt.Errorf("cannot execute tests: %w", err)
 	}
