@@ -3,9 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
 	"os/exec"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type suiteState struct {
@@ -46,13 +47,15 @@ func execTests(suiteRun *testSuiteRun) (int, error) {
 
 	scheduleLoop(ctx, cancel, suiteRun, &state)
 
-	log.Println(suiteRun.cmdName, "EXECUTIONTIME all tests:", time.Since(start))
+	log.Println("EXECUTIONTIME: All tests:", time.Since(start))
 
 	nErrs := len(state.errors)
-	if nErrs > 0 {
-		log.Println("ERROR: Printing errors for all tests")
-		for _, err := range state.errors {
-			log.Println(suiteRun.cmdName, err)
+	if nErrs == 0 {
+		log.Println("STATUS: All tests succeeded!")
+	} else {
+		log.Warnln("ERROR: Printing errors for all tests")
+		for i, err := range state.errors {
+			log.Warnf("ERROR %d: %s", i, err)
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				log.Print(string(exitErr.Stderr))
 			}
@@ -72,7 +75,7 @@ func scheduleLoop(ctx context.Context, cancel context.CancelFunc, suiteRun *test
 				break
 			}
 
-			log.Println("SCHEDULE action:", nextAction.name)
+			log.Println("SCHEDULE: Perform action:", nextAction.name)
 			activeActions++
 			go func(a *action) {
 				r := a.exec(ctx, suiteRun)
@@ -88,9 +91,9 @@ func scheduleLoop(ctx context.Context, cancel context.CancelFunc, suiteRun *test
 			break
 		}
 
-		log.Println("WAIT for result")
+		log.Println("SCHEDULE: Wait for result")
 		r := <-results
-		log.Println("APPLYING result for:", r.name)
+		log.Println("SCHEDULE: Apply result for:", r.name)
 		r.apply(state)
 		activeActions--
 
@@ -144,10 +147,10 @@ func performTestAction(run testRun, ids []int) *action {
 	return &action{
 		name: fmt.Sprintf("Test %s with IDs %v", run.testID, ids),
 		exec: func(ctx context.Context, suiteRun *testSuiteRun) result {
-			resultLog, err := performTest(ctx, suiteRun, run, ids)
+			report, err := performTest(ctx, suiteRun, run, ids)
 			return result{
 				apply: func(state *suiteState) {
-					fmt.Print(resultLog)
+					fmt.Fprint(log.StandardLogger().Out, report)
 					if err != nil {
 						state.errors = append(state.errors, err)
 					}

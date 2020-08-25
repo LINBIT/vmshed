@@ -2,10 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"log"
 	"os/exec"
 	"strconv"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type vm struct {
@@ -90,13 +91,13 @@ func removeImages(vmSpec *vmSpecification) {
 		argv := []string{"virter", "image", "rm", newImageName}
 		log.Printf("EXECUTING: %s", argv)
 		if stdouterr, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
-			log.Printf("ERROR: Could not remove image %s %v: stdouterr: %s", newImageName, err, stdouterr)
+			log.Errorf("ERROR: Could not remove image %s %v: stdouterr: %s", newImageName, err, stdouterr)
 			// do not return, keep going...
 		}
 	}
 }
 
-func startVMs(res *testResult, run testRun, quiet bool, testnodes ...vmInstance) error {
+func startVMs(logger *log.Logger, run testRun, testnodes ...vmInstance) error {
 	var vmStartWait sync.WaitGroup
 	errCh := make(chan error, len(testnodes))
 
@@ -104,7 +105,7 @@ func startVMs(res *testResult, run testRun, quiet bool, testnodes ...vmInstance)
 		vmStartWait.Add(1)
 		go func(vm vmInstance) {
 			defer vmStartWait.Done()
-			if err := runVM(res, run, quiet, vm); err != nil {
+			if err := runVM(logger, run, vm); err != nil {
 				errCh <- err
 			}
 		}(vm)
@@ -118,12 +119,12 @@ func startVMs(res *testResult, run testRun, quiet bool, testnodes ...vmInstance)
 	return err
 }
 
-func runVM(res *testResult, run testRun, quiet bool, vm vmInstance) error {
+func runVM(logger *log.Logger, run testRun, vm vmInstance) error {
 	vmName := vm.vmName()
 
 	// clean up, should not be neccessary, but hey...
 	argv := []string{"virter", "vm", "rm", vmName}
-	res.AppendLog(quiet, "EXECUTING: %s", argv)
+	logger.Printf("EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
 	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
 		return err
@@ -139,7 +140,7 @@ func runVM(res *testResult, run testRun, quiet bool, vm vmInstance) error {
 		"--wait-ssh",
 		vm.ImageName}
 
-	res.AppendLog(quiet, "EXECUTING: %s", argv)
+	logger.Printf("EXECUTING: %s", argv)
 	cmd := exec.Command(argv[0], argv[1:]...)
 
 	// use Output to capture stderr if the exit code is non-zero
@@ -147,15 +148,14 @@ func runVM(res *testResult, run testRun, quiet bool, vm vmInstance) error {
 	return err
 }
 
-// no parent ctx, we always (try) to do that
-func shutdownVMs(res *testResult, quiet bool, testnodes ...vmInstance) error {
+func shutdownVMs(logger *log.Logger, testnodes ...vmInstance) error {
 	for _, vm := range testnodes {
 		vmName := vm.vmName()
 
 		argv := []string{"virter", "vm", "rm", vmName}
-		res.AppendLog(quiet, "EXECUTING: %s", argv)
+		logger.Printf("EXECUTING: %s", argv)
 		if stdouterr, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
-			res.AppendLog(quiet, "ERROR: Could not stop VM %s %v: stdouterr: %s", vmName, err, stdouterr)
+			logger.Errorf("ERROR: Could not stop VM %s %v: stdouterr: %s", vmName, err, stdouterr)
 			// do not return, keep going...
 		}
 	}

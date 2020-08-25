@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
+	"io"
 	"os"
 	"os/exec"
-	"sync"
+	"strings"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type testGroup struct {
@@ -33,26 +35,11 @@ type TestResulter interface {
 
 // collect information about individual test runs
 // the interface is similar to the log package (which it also uses)
-// TODO(rck): we have one per test, and the mutex only protects the overall log, but not access to the buffer, this would require getters/extra pkg.
 type testResult struct {
-	log       bytes.Buffer // log messages of the framework (starting test, timing information,...)
-	logLogger *log.Logger
-
-	testLog    bytes.Buffer // output of the test itself ('virter vm exec' output)
-	testLogger *log.Logger
-
+	log      bytes.Buffer // log messages of the framework (starting test, timing information,...)
+	testLog  bytes.Buffer // output of the test itself ('virter vm exec' output)
 	execTime time.Duration
-
-	err error
-	sync.Mutex
-}
-
-func newTestResult(prefix string) *testResult {
-	tr := testResult{}
-	p := prefix + ": "
-	tr.logLogger = log.New(&tr.log, p, log.Ldate)
-	tr.testLogger = log.New(&tr.testLog, p, log.Ldate)
-	return &tr
+	err      error
 }
 
 func (r *testResult) ExecTime() time.Duration {
@@ -63,41 +50,7 @@ func (r *testResult) Err() error {
 	return r.err
 }
 
-func (r *testResult) Log() bytes.Buffer {
-	r.Lock()
-	defer r.Unlock()
-	return r.log
-}
-
-func (r *testResult) TestLog() bytes.Buffer {
-	r.Lock()
-	defer r.Unlock()
-	return r.testLog
-}
-
-func (r *testResult) writeLog(logger *log.Logger, quiet bool, format string, v ...interface{}) {
-	r.Lock()
-	logger.Printf(format, v...)
-	r.Unlock()
-
-	// TODO(rck): this generates slightly different time stamps..
-	if !quiet {
-		log.Printf(format, v...)
-	}
-}
-
-func (r *testResult) AppendLog(quiet bool, format string, v ...interface{}) {
-	r.writeLog(r.logLogger, quiet, format, v...)
-}
-
-func (r *testResult) AppendTestLog(quiet bool, format string, v ...interface{}) {
-	r.writeLog(r.testLogger, quiet, format, v...)
-}
-
 func performTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, ids []int) (string, error) {
-	var resultLog bytes.Buffer
-	logger := log.New(&resultLog, "", 0)
-
 	var vms []vmInstance
 	for i, vm := range run.vms {
 		var memory string
@@ -121,61 +74,67 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, ids [
 		vms = append(vms, v)
 	}
 
-	stTest := time.Now()
 	testRes := execTest(ctx, suiteRun, run, vms...)
 	testErr := testRes.err
-	testRes.execTime = time.Since(stTest)
-	testRes.AppendLog(suiteRun.quiet, "EXECUTIONTIME: %s, %v", run.testID, testRes.execTime)
 
-	state := "SUCCESS"
-	if testRes.err != nil {
-		state = "FAILED"
-	}
-	logger.Println("===========================================================================")
-	logger.Printf("| ** Results for %s - %s\n", run.testID, state)
-	if suiteRun.jenkins.IsActive() {
-		logger.Printf("| ** %s/artifact/%s\n", os.Getenv("BUILD_URL"), run.testDirOut)
-	}
-	logger.Println("===========================================================================")
-	testLog := testRes.Log()
-	logger.Print(&testLog)
+	var report bytes.Buffer
 
+	fmt.Fprintln(&report, "|===================================================================================================")
+	fmt.Fprintf(&report, "| ** Results for %s - %s\n", run.testID, testStateString(testRes.err))
 	if suiteRun.jenkins.IsActive() {
-		testLog := testRes.TestLog()
-		if err := suiteRun.jenkins.Log(run.testDirOut, "test.log", &testLog); err != nil {
-			logger.Printf("FAILED to write log; suppressing original error: %v", testErr)
+		fmt.Fprintf(&report, "| ** %s/artifact/%s\n", os.Getenv("BUILD_URL"), run.testDirOut)
+	}
+	fmt.Fprintln(&report, "|===================================================================================================")
+	logLines := strings.Split(strings.TrimSpace(testRes.log.String()), "\n")
+	for _, line := range logLines {
+		fmt.Fprintln(&report, "|", line)
+	}
+
+	testLog := testRes.testLog.Bytes()
+	if suiteRun.jenkins.IsActive() {
+		if err := suiteRun.jenkins.Log(run.testDirOut, "test.log", testLog); err != nil {
+			fmt.Fprintf(&report, "| FAILED to write log; suppressing original error: %v\n", testErr)
 			testErr = err
 		}
 
-		xmllog := testRes.TestLog()
-		if err := suiteRun.jenkins.XMLLog("test-results", run.testID, testRes, &xmllog); err != nil {
-			logger.Printf("FAILED to write XML log; suppressing original error: %v", testErr)
+		if err := suiteRun.jenkins.XMLLog("test-results", run.testID, testRes, testLog); err != nil {
+			fmt.Fprintf(&report, "| FAILED to write XML log; suppressing original error: %v\n", testErr)
 			testErr = err
 		}
 	} else {
-		testLog := testRes.TestLog()
-		logger.Printf("Test log for %s\n", run.testID)
-		logger.Print(&testLog)
+		fmt.Fprintf(&report, "| Test log for %s:\n", run.testID)
+		testLogLines := strings.Split(strings.TrimSpace(string(testLog)), "\n")
+		for _, line := range testLogLines {
+			fmt.Fprintln(&report, "|", line)
+		}
 	}
-	logger.Printf("END Results for %s\n", run.testID)
+	fmt.Fprintln(&report, "|===================================================================================================")
 
-	return resultLog.String(), testErr
+	return report.String(), testErr
+}
+
+func testStateString(err error) string {
+	if err != nil {
+		return "FAILED"
+	}
+	return "SUCCESS"
 }
 
 func execTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, testnodes ...vmInstance) *testResult {
-	res := newTestResult(suiteRun.cmdName)
+	res := testResult{}
+	logger := testLogger(&res.log, suiteRun.quiet)
 
-	res.AppendLog(suiteRun.quiet, "EXECUTING: %s Nodes(%+v)", run.testID, testnodes)
+	logger.Printf("EXECUTING: %s Nodes(%+v)", run.testID, testnodes)
 
 	// Start VMs
 	start := time.Now()
-	err := startVMs(res, run, suiteRun.quiet, testnodes...)
-	defer shutdownVMs(res, suiteRun.quiet, testnodes...)
+	err := startVMs(logger, run, testnodes...)
+	defer shutdownVMs(logger, testnodes...)
 	if err != nil {
 		res.err = err
-		return res
+		return &res
 	}
-	res.AppendLog(suiteRun.quiet, "EXECUTIONTIME: Starting VMs: %v", time.Since(start))
+	logger.Printf("EXECUTIONTIME: Starting VMs: %v", time.Since(start))
 
 	testNameEnv := fmt.Sprintf("env.TEST_NAME=%s", run.testName)
 
@@ -189,7 +148,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, testnode
 		argv = append(argv, vm.vmName())
 	}
 
-	res.AppendLog(suiteRun.quiet, "EXECUTING the actual test: %s", argv)
+	logger.Printf("EXECUTING TEST: %s", argv)
 
 	start = time.Now()
 
@@ -198,44 +157,76 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, testnode
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
+	cmd.Stdout = &res.testLog
+	cmd.Stderr = &res.testLog
 	testErr := cmd.Start()
 	if testErr == nil {
 		testDone := make(chan struct{})
 		// The termination handler must be started after cmd.Start()
-		go handleTestTermination(ctx, cmd, testDone, res, suiteRun.quiet)
+		go handleTestTermination(ctx, logger, cmd, testDone)
 		testErr = cmd.Wait()
 		close(testDone)
 	}
 
-	res.AppendTestLog(true, "%s\n", out.Bytes())
-
-	res.AppendLog(suiteRun.quiet, "EXECUTIONTIME: %s %v", run.testID, time.Since(start))
+	logger.Printf("EXECUTIONTIME: Running test %s: %v", run.testID, time.Since(start))
 	if testErr != nil { // "real" error or ctx canceled
-		res.err = fmt.Errorf("ERROR: %s %v", run.testID, testErr)
+		res.err = fmt.Errorf("%s: %v", run.testID, testErr)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			res.err = fmt.Errorf("%v %v", res.err, ctxErr)
 		}
-		return res
 	}
-	res.AppendLog(suiteRun.quiet, "SUCCESS: %s", run.testID)
 
-	return res
+	return &res
 }
 
-func handleTestTermination(ctx context.Context, cmd *exec.Cmd, done <-chan struct{}, res *testResult, quiet bool) {
+func handleTestTermination(ctx context.Context, logger *log.Logger, cmd *exec.Cmd, done <-chan struct{}) {
 	select {
 	case <-ctx.Done():
-		res.AppendLog(quiet, "TERMINATING test with SIGINT")
+		logger.Warnln("TERMINATING test with SIGINT")
 		cmd.Process.Signal(os.Interrupt)
 		select {
 		case <-time.After(10 * time.Second):
-			res.AppendLog(quiet, "WARNING! TERMINATING test with SIGKILL")
+			logger.Errorln("WARNING! TERMINATING test with SIGKILL")
 			cmd.Process.Kill()
 		case <-done:
 		}
 	case <-done:
+	}
+}
+
+func testLogger(out io.Writer, quiet bool) *log.Logger {
+	logger := log.New()
+	logger.Out = out
+	logger.Formatter = &log.TextFormatter{
+		DisableQuote:    true,
+		TimestampFormat: "15:04:05.000",
+	}
+
+	if !quiet {
+		logger.AddHook(&StandardLoggerHook{})
+	}
+
+	return logger
+}
+
+// StandardLoggerHook duplicates log messages to the standard logger
+type StandardLoggerHook struct {
+}
+
+func (hook *StandardLoggerHook) Fire(entry *log.Entry) error {
+	logEntry := *entry
+	logEntry.Logger = log.StandardLogger()
+	logEntry.Log(logEntry.Level, logEntry.Message)
+	return nil
+}
+
+func (hook *StandardLoggerHook) Levels() []log.Level {
+	return []log.Level{
+		log.PanicLevel,
+		log.FatalLevel,
+		log.ErrorLevel,
+		log.WarnLevel,
+		log.InfoLevel,
+		log.DebugLevel,
 	}
 }

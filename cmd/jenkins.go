@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/user"
@@ -82,27 +81,18 @@ func (j *Jenkins) CreateFile(subDir string, name string) (*os.File, error) {
 }
 
 // Log writes an arbitrary log file, where "subDir" is a subdirectory in the Jenkins workspace, and "name" is the name of the file to write to.
-func (j *Jenkins) Log(subDir, name string, r io.Reader) error {
+func (j *Jenkins) Log(subDir, name string, testLog []byte) error {
 	p, err := j.createSubDir(subDir)
 	if err != nil {
 		return err
 	}
 
-	b, err := ioutil.ReadAll(r)
-	if err != nil {
-		return err
-	}
-	return ioutil.WriteFile(filepath.Join(p, name), b, 0644)
+	return ioutil.WriteFile(filepath.Join(p, name), testLog, 0644)
 }
 
-func (j *Jenkins) XMLLog(restultsDir, testName string, testRes TestResulter, r io.Reader) error {
+func (j *Jenkins) XMLLog(restultsDir, testName string, testRes TestResulter, testLog []byte) error {
 	// Used to remove invalid runes from the output.
 	re, err := regexp.Compile("[^\t\n\r\x20-\x7e]")
-	if err != nil {
-		return err
-	}
-
-	b, err := ioutil.ReadAll(r)
 	if err != nil {
 		return err
 	}
@@ -124,7 +114,7 @@ func (j *Jenkins) XMLLog(restultsDir, testName string, testRes TestResulter, r i
 	header += fmt.Sprintf("<testcase classname=\"test.%s\" name=\"%s.run\" time=\"%.2f\">", testName, testName, testRes.ExecTime().Seconds())
 	header += "<system-out>\n<![CDATA[\n"
 	f.WriteString(header)
-	f.Write(re.ReplaceAllLiteral(b, []byte{' '}))
+	f.Write(re.ReplaceAllLiteral(testLog, []byte{' '}))
 	f.WriteString("]]></system-out>\n")
 	if nrFailed > 0 {
 		f.WriteString("<failure message=\"FAILED\"/>\n")

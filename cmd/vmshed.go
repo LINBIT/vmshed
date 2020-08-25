@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"os"
 	"os/exec"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/nightlyone/lockfile"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/LINBIT/vmshed/cmd/config"
@@ -41,7 +41,6 @@ type testSpecification struct {
 }
 
 type testSuiteRun struct {
-	cmdName     string
 	vmSpec      *vmSpecification
 	testSpec    *testSpecification
 	overrides   []string
@@ -56,13 +55,16 @@ type testSuiteRun struct {
 
 // Execute runs vmshed
 func Execute() {
+	log.SetFormatter(&log.TextFormatter{
+		TimestampFormat: "2006-01-02 15:04:05.000",
+	})
+
 	if err := rootCommand().Execute(); err != nil {
 		log.Fatal(err)
 	}
 }
 
 func rootCommand() *cobra.Command {
-	cmdName := filepath.Base(os.Args[0])
 	prog := path.Base(os.Args[0])
 
 	var vmSpecPath string
@@ -90,10 +92,10 @@ func rootCommand() *cobra.Command {
 			}
 
 			if startVM <= 0 {
-				log.Fatal(cmdName, "--startvm has to be positive")
+				log.Fatal("--startvm has to be positive")
 			}
 			if nrVMs <= 0 {
-				log.Fatal(cmdName, "--nvms has to be positive")
+				log.Fatal("--nvms has to be positive")
 			}
 
 			jenkins, err := NewJenkins(jenkinsWS)
@@ -148,13 +150,12 @@ func rootCommand() *cobra.Command {
 					baseImages[i] = v.BaseImage
 				}
 				baseImageString := strings.Join(baseImages, ",")
-				log.Printf("WILL RUN: %s with base images %s\n", run.testID, baseImageString)
+				log.Printf("PLAN: %s on %s", run.testID, baseImageString)
 			}
 
 			start := time.Now()
 
 			suiteRun := testSuiteRun{
-				cmdName:     cmdName,
 				vmSpec:      &vmSpec,
 				testSpec:    &testSpec,
 				overrides:   provisionOverrides,
@@ -166,21 +167,21 @@ func rootCommand() *cobra.Command {
 				quiet:       quiet,
 				testTimeout: testTimeout,
 			}
-			nFailed, err := provisionAndExec(&suiteRun, startVM)
+			nFailed, err := provisionAndExec(filepath.Base(os.Args[0]), &suiteRun, startVM)
 			if err != nil {
-				log.Printf("ERROR: %v\n", err)
+				log.Errorf("ERROR: %v", err)
 				for wrappedErr := err; wrappedErr != nil; wrappedErr = errors.Unwrap(wrappedErr) {
 					if exitErr, ok := wrappedErr.(*exec.ExitError); ok {
-						log.Printf("ERROR DETAILS: stderr from '%v':\n%s", wrappedErr, string(exitErr.Stderr))
+						log.Errorf("ERROR DETAILS: stderr from '%v':\n%s", wrappedErr, string(exitErr.Stderr))
 					}
 				}
 			}
 
-			log.Println(cmdName, "OVERALL EXECUTIONTIME:", time.Since(start))
+			log.Println("OVERALL EXECUTIONTIME:", time.Since(start))
 
 			// transfer ownership to Jenkins, so that the workspace can be cleaned before running again
 			if err := jenkins.OwnWorkspace(); err != nil {
-				log.Println(cmdName, "ERROR SETTING WORKSPACE OWNERSHIP:", err)
+				log.Println("ERROR SETTING WORKSPACE OWNERSHIP:", err)
 			}
 
 			os.Exit(nFailed)
@@ -297,11 +298,11 @@ func newTestRun(jenkins *Jenkins, testName string, vms []vm, testIndex int) test
 	return run
 }
 
-func provisionAndExec(suiteRun *testSuiteRun, startVM int) (int, error) {
+func provisionAndExec(cmdName string, suiteRun *testSuiteRun, startVM int) (int, error) {
 	for i := 0; i < suiteRun.nrVMs; i++ {
 		nr := i + startVM
 
-		lockName := fmt.Sprintf("%s.vm-%d.lock", suiteRun.cmdName, nr)
+		lockName := fmt.Sprintf("%s.vm-%d.lock", cmdName, nr)
 		lock, err := lockfile.New(filepath.Join(os.TempDir(), lockName))
 		if err != nil {
 			return 1, fmt.Errorf("cannot init lock. reason: %w", err)
