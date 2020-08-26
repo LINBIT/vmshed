@@ -217,7 +217,8 @@ func provisionImageAction(v *vm, id int) *action {
 func unwrapStderr(err error) {
 	for wrappedErr := err; wrappedErr != nil; wrappedErr = errors.Unwrap(wrappedErr) {
 		if exitErr, ok := wrappedErr.(*exec.ExitError); ok {
-			log.Warnf("ERROR DETAILS: stderr:\n%s", string(exitErr.Stderr))
+			log.Warnf("ERROR DETAILS: stderr:")
+			fmt.Fprint(log.StandardLogger().Out, string(exitErr.Stderr))
 		}
 	}
 }
