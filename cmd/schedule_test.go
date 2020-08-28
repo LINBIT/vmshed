@@ -79,20 +79,20 @@ func TestChooseNextAction(t *testing.T) {
 			sequence: []step{
 				{
 					expected: []action{
-						&provisionImageAction{v: &vm1, id: 5},
-						&provisionImageAction{v: &vm0, id: 6},
+						&provisionImageAction{v: &vm0, id: 5},
+						&provisionImageAction{v: &vm1, id: 6},
 					},
 				},
 				{
-					result:   &provisionImageAction{v: &vm0, id: 6},
-					expected: []action{&performTestAction{run: &testRun1VM, ids: []int{6}}},
+					result: &provisionImageAction{v: &vm0, id: 5},
 				},
 				{
-					result: &provisionImageAction{v: &vm1, id: 5},
-				},
-				{
-					result:   &performTestAction{run: &testRun1VM, ids: []int{6}},
+					result:   &provisionImageAction{v: &vm1, id: 6},
 					expected: []action{&performTestAction{run: &testRun2VM, ids: []int{5, 6}}},
+				},
+				{
+					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}},
+					expected: []action{&performTestAction{run: &testRun1VM, ids: []int{5}}},
 				},
 			},
 		},

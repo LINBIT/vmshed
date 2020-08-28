@@ -162,6 +162,7 @@ func rootCommand() *cobra.Command {
 			if err != nil {
 				log.Fatal(err)
 			}
+			vmSpec.VMs = removeUnusedVMs(vmSpec.VMs, testRuns)
 
 			for _, run := range testRuns {
 				baseImages := make([]string, len(run.vms))
@@ -368,6 +369,25 @@ func filterVMs(vms []vm, baseImages []string) []vm {
 
 		if found {
 			selected = append(selected, vm)
+		}
+	}
+
+	return selected
+}
+
+func removeUnusedVMs(vms []vm, testRuns []testRun) []vm {
+	usedVMs := make(map[string]bool)
+
+	for _, run := range testRuns {
+		for _, v := range run.vms {
+			usedVMs[v.BaseImage] = true
+		}
+	}
+
+	selected := []vm{}
+	for _, v := range vms {
+		if usedVMs[v.BaseImage] {
+			selected = append(selected, v)
 		}
 	}
 

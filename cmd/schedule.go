@@ -9,12 +9,27 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type imageStage string
+
+const (
+	imageNone      imageStage = "None"
+	imageProvision imageStage = "Provision"
+	imageReady     imageStage = "Ready"
+)
+
+type runStage string
+
+const (
+	runNew  runStage = "New"
+	runExec runStage = "Exec"
+	runDone runStage = "Done"
+)
+
 type suiteState struct {
-	remainingRuns     map[string]bool
-	remainingImages   map[string]bool
-	provisionedImages map[string]bool
-	freeIDs           map[int]bool
-	errors            []error
+	imageStage map[string]imageStage
+	runStage   map[string]runStage
+	freeIDs    map[int]bool
+	errors     []error
 }
 
 type action interface {
@@ -54,17 +69,22 @@ func runScheduler(suiteRun *testSuiteRun) (int, error) {
 
 func initializeState(suiteRun *testSuiteRun) *suiteState {
 	state := suiteState{
-		remainingRuns:     make(map[string]bool),
-		remainingImages:   make(map[string]bool),
-		provisionedImages: make(map[string]bool),
-		freeIDs:           make(map[int]bool, suiteRun.nrVMs),
+		imageStage: make(map[string]imageStage),
+		runStage:   make(map[string]runStage),
+		freeIDs:    make(map[int]bool),
 	}
 	for _, run := range suiteRun.testRuns {
-		state.remainingRuns[run.testID] = true
+		state.runStage[run.testID] = runNew
+	}
+
+	initialImageStage := imageReady
+	if suiteRun.vmSpec.ProvisionFile != "" {
+		initialImageStage = imageNone
 	}
 	for _, v := range suiteRun.vmSpec.VMs {
-		state.remainingImages[v.BaseImage] = true
+		state.imageStage[v.BaseImage] = initialImageStage
 	}
+
 	for i := 0; i < suiteRun.nrVMs; i++ {
 		state.freeIDs[suiteRun.startVM+i] = true
 	}
@@ -92,8 +112,10 @@ func scheduleLoop(ctx context.Context, cancel context.CancelFunc, suiteRun *test
 		}
 
 		if activeActions == 0 {
-			if len(state.remainingRuns) > 0 {
-				state.errors = append(state.errors, fmt.Errorf("Skipped test runs: %v", state.remainingRuns))
+			for _, run := range suiteRun.testRuns {
+				if state.runStage[run.testID] != runDone {
+					state.errors = append(state.errors, fmt.Errorf("Skipped test run: %s", run.testID))
+				}
 			}
 			break
 		}
@@ -115,55 +137,86 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 		return nil
 	}
 
-	var neededVM *vm
+	// Ignore IDs which are being used for provisioning when deciding which
+	// test to work towards. This is necessary to ensure that larger tests
+	// are preferred for efficient use of the available IDs.
+	nonTestIDs := countNonTestIDs(suiteRun, state)
+
 	var bestRun *testRun
 
-	for _, run := range suiteRun.testRuns {
-		if !state.remainingRuns[run.testID] {
+	for i, run := range suiteRun.testRuns {
+		if state.runStage[run.testID] != runNew {
 			continue
 		}
 
-		if suiteRun.vmSpec.ProvisionFile != "" {
-			haveImages := true
-			for _, v := range run.vms {
-				if !state.provisionedImages[v.BaseImage] {
-					if state.remainingImages[v.BaseImage] {
-						vCopy := v
-						neededVM = &vCopy
-					}
-					haveImages = false
-				}
-			}
-			if !haveImages {
-				continue
-			}
-		}
-
-		if len(state.freeIDs) < len(run.vms) {
+		if nonTestIDs < len(run.vms) {
 			continue
 		}
 
 		// Prefer runs that use more VMs because that will generally
 		// use the available IDs more efficiently
-		betterRun := bestRun == nil || len(run.vms) > len(bestRun.vms)
+		betterRun := bestRun == nil ||
+			len(run.vms) > len(bestRun.vms) ||
+			(len(run.vms) == len(bestRun.vms) && !allImagesReady(state, bestRun) && allImagesReady(state, &run))
 
 		if betterRun {
-			runCopy := run
-			bestRun = &runCopy
+			bestRun = &suiteRun.testRuns[i]
 		}
 	}
 
 	if bestRun != nil {
-		ids := getIDs(suiteRun, state, len(bestRun.vms))
-		return &performTestAction{run: bestRun, ids: ids}
+		action := nextActionRun(suiteRun, state, bestRun)
+		if action != nil {
+			return action
+		}
 	}
 
-	if neededVM != nil && len(state.freeIDs) > 0 {
-		ids := getIDs(suiteRun, state, 1)
-		return &provisionImageAction{v: neededVM, id: ids[0]}
+	if len(state.freeIDs) < 1 {
+		return nil
+	}
+
+	for i, v := range suiteRun.vmSpec.VMs {
+		if state.imageStage[v.BaseImage] == imageNone {
+			ids := getIDs(suiteRun, state, 1)
+			return &provisionImageAction{v: &suiteRun.vmSpec.VMs[i], id: ids[0]}
+		}
 	}
 
 	return nil
+}
+
+func allImagesReady(state *suiteState, run *testRun) bool {
+	for _, v := range run.vms {
+		if state.imageStage[v.BaseImage] != imageReady {
+			return false
+		}
+	}
+	return true
+}
+
+func countNonTestIDs(suiteRun *testSuiteRun, state *suiteState) int {
+	nonTestIDs := suiteRun.nrVMs
+
+	for _, run := range suiteRun.testRuns {
+		if state.runStage[run.testID] == runExec {
+			nonTestIDs -= len(run.vms)
+		}
+	}
+
+	return nonTestIDs
+}
+
+func nextActionRun(suiteRun *testSuiteRun, state *suiteState, run *testRun) action {
+	if len(state.freeIDs) < len(run.vms) {
+		return nil
+	}
+
+	if !allImagesReady(state, run) {
+		return nil
+	}
+
+	ids := getIDs(suiteRun, state, len(run.vms))
+	return &performTestAction{run: run, ids: ids}
 }
 
 func getIDs(suiteRun *testSuiteRun, state *suiteState, n int) []int {
@@ -198,7 +251,7 @@ func (a *performTestAction) name() string {
 }
 
 func (a *performTestAction) updatePre(state *suiteState) {
-	delete(state.remainingRuns, a.run.testID)
+	state.runStage[a.run.testID] = runExec
 	deleteAll(state.freeIDs, a.ids)
 }
 
@@ -207,6 +260,7 @@ func (a *performTestAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
 }
 
 func (a *performTestAction) updatePost(state *suiteState) {
+	state.runStage[a.run.testID] = runDone
 	fmt.Fprint(log.StandardLogger().Out, a.report)
 	if a.err != nil {
 		state.errors = append(state.errors, a.err)
@@ -227,7 +281,7 @@ func (a *provisionImageAction) name() string {
 }
 
 func (a *provisionImageAction) updatePre(state *suiteState) {
-	delete(state.remainingImages, a.v.BaseImage)
+	state.imageStage[a.v.BaseImage] = imageProvision
 	delete(state.freeIDs, a.id)
 }
 
@@ -238,7 +292,7 @@ func (a *provisionImageAction) exec(ctx context.Context, suiteRun *testSuiteRun)
 func (a *provisionImageAction) updatePost(state *suiteState) {
 	state.freeIDs[a.id] = true
 	if a.err == nil {
-		state.provisionedImages[a.v.BaseImage] = true
+		state.imageStage[a.v.BaseImage] = imageReady
 	} else {
 		state.errors = append(state.errors,
 			fmt.Errorf("provision %s: %w", a.v.BaseImage, a.err))
