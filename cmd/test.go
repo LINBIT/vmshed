@@ -51,7 +51,7 @@ func (r *testResult) Err() error {
 	return r.err
 }
 
-func performTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, ids []int) (string, error) {
+func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids []int) (string, error) {
 	if run.outDir != "" {
 		err := os.MkdirAll(run.outDir, 0755)
 		if err != nil {
@@ -129,7 +129,7 @@ func testStateString(err error) string {
 	return "SUCCESS"
 }
 
-func execTest(ctx context.Context, suiteRun *testSuiteRun, run testRun, testnodes ...vmInstance) *testResult {
+func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnodes ...vmInstance) *testResult {
 	res := testResult{}
 	logger := testLogger(&res.log, suiteRun.quiet)
 

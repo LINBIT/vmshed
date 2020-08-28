@@ -93,7 +93,7 @@ func removeImages(vmSpec *vmSpecification) {
 	}
 }
 
-func startVMs(logger *log.Logger, run testRun, testnodes ...vmInstance) error {
+func startVMs(logger *log.Logger, run *testRun, testnodes ...vmInstance) error {
 	var vmStartWait sync.WaitGroup
 	errCh := make(chan error, len(testnodes))
 
@@ -115,7 +115,7 @@ func startVMs(logger *log.Logger, run testRun, testnodes ...vmInstance) error {
 	return err
 }
 
-func runVM(logger *log.Logger, run testRun, vm vmInstance) error {
+func runVM(logger *log.Logger, run *testRun, vm vmInstance) error {
 	vmName := vm.vmName()
 
 	// clean up, should not be neccessary, but hey...

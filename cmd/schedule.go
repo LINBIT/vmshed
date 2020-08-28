@@ -17,23 +17,42 @@ type suiteState struct {
 	errors            []error
 }
 
-type action struct {
-	name string
+type action interface {
+	name() string
+
+	// updatePre updates the state before the action starts.
+	updatePre(state *suiteState)
+
 	// exec carries out the action. It should block until the action is
 	// finished.
-	exec func(ctx context.Context, suiteRun *testSuiteRun) result
-}
+	exec(ctx context.Context, suiteRun *testSuiteRun)
 
-type result struct {
-	name string
-	// apply updates the state with the results of the action.
-	apply func(state *suiteState)
+	// updatePost updates the state with the results of the action.
+	updatePost(state *suiteState)
 }
 
 func runScheduler(suiteRun *testSuiteRun) (int, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	state := initializeState(suiteRun)
+
+	scheduleLoop(ctx, cancel, suiteRun, state)
+
+	nErrs := len(state.errors)
+	if nErrs == 0 {
+		log.Println("STATUS: All tests succeeded!")
+	} else {
+		log.Warnln("ERROR: Printing all errors")
+		for i, err := range state.errors {
+			log.Warnf("ERROR %d: %s", i, err)
+			unwrapStderr(err)
+		}
+	}
+	return nErrs, nil
+}
+
+func initializeState(suiteRun *testSuiteRun) *suiteState {
 	state := suiteState{
 		remainingRuns:     make(map[string]bool),
 		remainingImages:   make(map[string]bool),
@@ -49,24 +68,11 @@ func runScheduler(suiteRun *testSuiteRun) (int, error) {
 	for i := 0; i < suiteRun.nrVMs; i++ {
 		state.freeIDs[suiteRun.startVM+i] = true
 	}
-
-	scheduleLoop(ctx, cancel, suiteRun, &state)
-
-	nErrs := len(state.errors)
-	if nErrs == 0 {
-		log.Println("STATUS: All tests succeeded!")
-	} else {
-		log.Warnln("ERROR: Printing all errors")
-		for i, err := range state.errors {
-			log.Warnf("ERROR %d: %s", i, err)
-			unwrapStderr(err)
-		}
-	}
-	return nErrs, nil
+	return &state
 }
 
 func scheduleLoop(ctx context.Context, cancel context.CancelFunc, suiteRun *testSuiteRun, state *suiteState) {
-	results := make(chan result)
+	results := make(chan action)
 	activeActions := 0
 
 	for {
@@ -76,12 +82,12 @@ func scheduleLoop(ctx context.Context, cancel context.CancelFunc, suiteRun *test
 				break
 			}
 
-			log.Println("SCHEDULE: Perform action:", nextAction.name)
+			log.Println("SCHEDULE: Perform action:", nextAction.name())
+			nextAction.updatePre(state)
 			activeActions++
-			go func(a *action) {
-				r := a.exec(ctx, suiteRun)
-				r.name = a.name
-				results <- r
+			go func(a action) {
+				a.exec(ctx, suiteRun)
+				results <- a
 			}(nextAction)
 		}
 
@@ -94,8 +100,8 @@ func scheduleLoop(ctx context.Context, cancel context.CancelFunc, suiteRun *test
 
 		log.Println("SCHEDULE: Wait for result")
 		r := <-results
-		log.Println("SCHEDULE: Apply result for:", r.name)
-		r.apply(state)
+		log.Println("SCHEDULE: Apply result for:", r.name())
+		r.updatePost(state)
 		activeActions--
 
 		if suiteRun.failTest && state.errors != nil {
@@ -104,7 +110,7 @@ func scheduleLoop(ctx context.Context, cancel context.CancelFunc, suiteRun *test
 	}
 }
 
-func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) *action {
+func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 	if suiteRun.failTest && state.errors != nil {
 		return nil
 	}
@@ -148,69 +154,94 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) *action {
 	}
 
 	if bestRun != nil {
-		delete(state.remainingRuns, bestRun.testID)
-		ids := popN(state.freeIDs, len(bestRun.vms))
-		return performTestAction(*bestRun, ids)
+		ids := getIDs(suiteRun, state, len(bestRun.vms))
+		return &performTestAction{run: bestRun, ids: ids}
 	}
 
 	if neededVM != nil && len(state.freeIDs) > 0 {
-		delete(state.remainingImages, neededVM.BaseImage)
-		ids := popN(state.freeIDs, 1)
-		return provisionImageAction(neededVM, ids[0])
+		ids := getIDs(suiteRun, state, 1)
+		return &provisionImageAction{v: neededVM, id: ids[0]}
 	}
 
 	return nil
 }
 
-func popN(m map[int]bool, n int) []int {
-	ints := make([]int, 0, n)
-	for id := range m {
-		delete(m, id)
-		ints = append(ints, id)
-		if len(ints) == n {
-			break
+func getIDs(suiteRun *testSuiteRun, state *suiteState, n int) []int {
+	ids := make([]int, 0, n)
+	for i := 0; i < suiteRun.nrVMs; i++ {
+		id := suiteRun.startVM + i
+		if state.freeIDs[id] {
+			ids = append(ids, id)
+			if len(ids) == n {
+				break
+			}
 		}
 	}
-	return ints
+	return ids
 }
 
-func performTestAction(run testRun, ids []int) *action {
-	return &action{
-		name: fmt.Sprintf("Test %s with IDs %v", run.testID, ids),
-		exec: func(ctx context.Context, suiteRun *testSuiteRun) result {
-			report, err := performTest(ctx, suiteRun, run, ids)
-			return result{
-				apply: func(state *suiteState) {
-					fmt.Fprint(log.StandardLogger().Out, report)
-					if err != nil {
-						state.errors = append(state.errors, err)
-					}
-					for _, id := range ids {
-						state.freeIDs[id] = true
-					}
-				},
-			}
-		},
+func deleteAll(m map[int]bool, ints []int) {
+	for _, index := range ints {
+		delete(m, index)
 	}
 }
 
-func provisionImageAction(v *vm, id int) *action {
-	return &action{
-		name: fmt.Sprintf("Provision image %s with ID %d", v.BaseImage, id),
-		exec: func(ctx context.Context, suiteRun *testSuiteRun) result {
-			err := provisionImage(suiteRun.vmSpec, suiteRun.overrides, id, v)
-			return result{
-				apply: func(state *suiteState) {
-					state.freeIDs[id] = true
-					if err == nil {
-						state.provisionedImages[v.BaseImage] = true
-					} else {
-						state.errors = append(state.errors,
-							fmt.Errorf("provision %s: %w", v.BaseImage, err))
-					}
-				},
-			}
-		},
+type performTestAction struct {
+	run    *testRun
+	ids    []int
+	report string
+	err    error
+}
+
+func (a *performTestAction) name() string {
+	return fmt.Sprintf("Test %s with IDs %v", a.run.testID, a.ids)
+}
+
+func (a *performTestAction) updatePre(state *suiteState) {
+	delete(state.remainingRuns, a.run.testID)
+	deleteAll(state.freeIDs, a.ids)
+}
+
+func (a *performTestAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
+	a.report, a.err = performTest(ctx, suiteRun, a.run, a.ids)
+}
+
+func (a *performTestAction) updatePost(state *suiteState) {
+	fmt.Fprint(log.StandardLogger().Out, a.report)
+	if a.err != nil {
+		state.errors = append(state.errors, a.err)
+	}
+	for _, id := range a.ids {
+		state.freeIDs[id] = true
+	}
+}
+
+type provisionImageAction struct {
+	v   *vm
+	id  int
+	err error
+}
+
+func (a *provisionImageAction) name() string {
+	return fmt.Sprintf("Provision image %s with ID %d", a.v.BaseImage, a.id)
+}
+
+func (a *provisionImageAction) updatePre(state *suiteState) {
+	delete(state.remainingImages, a.v.BaseImage)
+	delete(state.freeIDs, a.id)
+}
+
+func (a *provisionImageAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
+	a.err = provisionImage(suiteRun.vmSpec, suiteRun.overrides, a.id, a.v)
+}
+
+func (a *provisionImageAction) updatePost(state *suiteState) {
+	state.freeIDs[a.id] = true
+	if a.err == nil {
+		state.provisionedImages[a.v.BaseImage] = true
+	} else {
+		state.errors = append(state.errors,
+			fmt.Errorf("provision %s: %w", a.v.BaseImage, a.err))
 	}
 }
 
