@@ -232,7 +232,7 @@ func (a *provisionImageAction) updatePre(state *suiteState) {
 }
 
 func (a *provisionImageAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
-	a.err = provisionImage(suiteRun.vmSpec, suiteRun.overrides, a.id, a.v)
+	a.err = provisionImage(suiteRun.vmSpec, suiteRun.overrides, a.id, a.v, suiteRun.jenkins)
 }
 
 func (a *provisionImageAction) updatePost(state *suiteState) {

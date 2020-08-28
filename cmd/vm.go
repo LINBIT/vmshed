@@ -35,7 +35,7 @@ func testIDString(test string, vmCount int, testIndex int) string {
 	return fmt.Sprintf("%s-%d-%d", test, vmCount, testIndex)
 }
 
-func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v *vm) error {
+func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v *vm, jenkins *Jenkins) error {
 	newImageName := vmSpec.ImageName(v)
 
 	// clean up, should not be neccessary, but hey...
@@ -49,6 +49,9 @@ func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v *vm) 
 	argv = []string{"virter", "image", "build",
 		"--id", strconv.Itoa(nr),
 		"--provision", vmSpec.ProvisionFile}
+	if jenkins.IsActive() {
+		argv = append(argv, "--console", jenkins.SubDir("provision-log"))
+	}
 	for _, override := range overrides {
 		argv = append(argv, "--set", override)
 	}
