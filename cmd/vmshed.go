@@ -2,9 +2,8 @@ package cmd
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
-	"math/big"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path"
@@ -87,6 +86,7 @@ func rootCommand() *cobra.Command {
 
 	var vmSpecPath string
 	var testSpecPath string
+	var randomSeed int64
 	var provisionOverrides []string
 	var baseImages []string
 	var toRun string
@@ -134,6 +134,13 @@ func rootCommand() *cobra.Command {
 			}
 			testSpec.TestSuiteFile = joinIfRel(filepath.Dir(testSpecPath), testSpec.TestSuiteFile)
 			testSpec.TestTimeout = durationDefault(testSpec.TestTimeout, 5*time.Minute)
+
+			if randomSeed == 0 {
+				randomSeed = time.Now().UTC().UnixNano()
+			}
+
+			log.Printf("Using random seed: %d", randomSeed)
+			rand.Seed(randomSeed)
 
 			var tests []testGroup
 			for _, test := range testSpec.TestGroups {
@@ -209,6 +216,7 @@ func rootCommand() *cobra.Command {
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "", false, "Don't print progess messages while tests are running")
 	rootCmd.Flags().StringVarP(&jenkinsWS, "jenkins", "", "", "If this is set to a path for the current job, text output is saved to files, logs get copied,...")
 	rootCmd.Flags().BoolVarP(&version, "version", "", false, "Print version and exit")
+	rootCmd.Flags().Int64VarP(&randomSeed, "seed", "", 0, "The random number generator seed to use. Specifying 0 seeds with the current time (the default)")
 
 	return rootCmd
 }
@@ -284,11 +292,7 @@ func repeatVM(v vm, count int) []vm {
 }
 
 func randomVM(vms []vm) (vm, error) {
-	r, err := rand.Int(rand.Reader, big.NewInt(int64(len(vms))))
-	if err != nil {
-		return vm{}, err
-	}
-	return vms[r.Int64()], nil
+	return vms[rand.Int63n(int64(len(vms)))], nil
 }
 
 func newTestRun(jenkins *Jenkins, testName string, vms []vm, testIndex int) testRun {
