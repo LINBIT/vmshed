@@ -18,6 +18,7 @@ type vm struct {
 	Values    map[string]string `toml:"values"`
 	Memory    string            `toml:"memory"`
 	VCPUs     uint              `toml:"vcpus"`
+	Disks     []string          `toml:"disks"`
 }
 
 type vmInstance struct {
@@ -25,6 +26,7 @@ type vmInstance struct {
 	nr        int
 	memory    string
 	vcpus     uint
+	disks     []string
 }
 
 func (vm vmInstance) vmName() string {
@@ -134,10 +136,12 @@ func runVM(logger *log.Logger, run *testRun, vm vmInstance) error {
 		"--id", strconv.Itoa(vm.nr),
 		"--console", run.outDir,
 		"--memory", vm.memory,
-		"--vcpus", strconv.Itoa(int(vm.vcpus)),
-		"--disk", "name=data,size=2G,bus=scsi",
-		"--wait-ssh",
-		vm.ImageName}
+		"--vcpus", strconv.Itoa(int(vm.vcpus))}
+
+	for _, disks := range vm.disks {
+		argv = append(argv, "--disk", disks)
+	}
+	argv = append(argv, "--wait-ssh", vm.ImageName)
 
 	logger.Printf("EXECUTING: %s", argv)
 	cmd := exec.Command(argv[0], argv[1:]...)

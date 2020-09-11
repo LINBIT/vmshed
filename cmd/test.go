@@ -63,6 +63,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	for i, v := range run.vms {
 		var memory string
 		var vcpus uint
+		var disks []string
 		if v.Memory != "" {
 			memory = v.Memory
 		} else {
@@ -73,11 +74,17 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 		} else {
 			vcpus = 4
 		}
+		if len(v.Disks) > 0 {
+			disks = v.Disks
+		} else {
+			disks = []string{"name=data,size=2G,bus=scsi"}
+		}
 		instance := vmInstance{
 			ImageName: suiteRun.vmSpec.ImageName(&v),
 			nr:        ids[i],
 			memory:    memory,
 			vcpus:     vcpus,
+			disks:     disks,
 		}
 		vms = append(vms, instance)
 	}
