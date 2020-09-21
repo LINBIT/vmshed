@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/nightlyone/lockfile"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -311,20 +310,6 @@ func newTestRun(jenkins *Jenkins, testName string, vms []vm, testIndex int) test
 }
 
 func provisionAndExec(cmdName string, suiteRun *testSuiteRun) (int, error) {
-	for i := 0; i < suiteRun.nrVMs; i++ {
-		nr := i + suiteRun.startVM
-
-		lockName := fmt.Sprintf("%s.vm-%d.lock", cmdName, nr)
-		lock, err := lockfile.New(filepath.Join(os.TempDir(), lockName))
-		if err != nil {
-			return 1, fmt.Errorf("cannot init lock. reason: %w", err)
-		}
-		if err = lock.TryLock(); err != nil {
-			return 1, fmt.Errorf("cannot lock %q, reason: %w", lock, err)
-		}
-		defer lock.Unlock()
-	}
-
 	// Note: When virter first starts it generates a key pair. However,
 	// when we start multiple instances concurrently, they race. The result
 	// is that the VMs start successfully, but then the test can only
