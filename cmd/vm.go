@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -44,7 +45,9 @@ func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v *vm, 
 	argv := []string{"virter", "image", "rm", newImageName}
 	log.Printf("EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
-	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = virterEnv()
+	if err := cmd.Run(); err != nil {
 		return err
 	}
 
@@ -62,7 +65,8 @@ func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v *vm, 
 	}
 	argv = append(argv, v.BaseImage, newImageName)
 
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd = exec.Command(argv[0], argv[1:]...)
+	cmd.Env = virterEnv()
 
 	var out bytes.Buffer
 	cmd.Stderr = &out
@@ -91,7 +95,9 @@ func removeImages(vmSpec *vmSpecification) {
 
 		argv := []string{"virter", "image", "rm", newImageName}
 		log.Printf("EXECUTING: %s", argv)
-		if stdouterr, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
+		cmd := exec.Command(argv[0], argv[1:]...)
+		cmd.Env = virterEnv()
+		if stdouterr, err := cmd.CombinedOutput(); err != nil {
 			log.Errorf("ERROR: Could not remove image %s %v: stdouterr: %s", newImageName, err, stdouterr)
 			// do not return, keep going...
 		}
@@ -127,7 +133,9 @@ func runVM(logger *log.Logger, run *testRun, vm vmInstance) error {
 	argv := []string{"virter", "vm", "rm", vmName}
 	logger.Printf("EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
-	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = virterEnv()
+	if err := cmd.Run(); err != nil {
 		return err
 	}
 
@@ -144,7 +152,8 @@ func runVM(logger *log.Logger, run *testRun, vm vmInstance) error {
 	argv = append(argv, "--wait-ssh", vm.ImageName)
 
 	logger.Printf("EXECUTING: %s", argv)
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd = exec.Command(argv[0], argv[1:]...)
+	cmd.Env = virterEnv()
 
 	// use Output to capture stderr if the exit code is non-zero
 	_, err := cmd.Output()
@@ -157,13 +166,19 @@ func shutdownVMs(logger *log.Logger, testnodes ...vmInstance) error {
 
 		argv := []string{"virter", "vm", "rm", vmName}
 		logger.Printf("EXECUTING: %s", argv)
-		if stdouterr, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
+		cmd := exec.Command(argv[0], argv[1:]...)
+		cmd.Env = virterEnv()
+		if stdouterr, err := cmd.CombinedOutput(); err != nil {
 			logger.Errorf("ERROR: Could not stop VM %s %v: stdouterr: %s", vmName, err, stdouterr)
 			// do not return, keep going...
 		}
 	}
 
 	return nil
+}
+
+func virterEnv() []string {
+	return append(os.Environ(), "LIBVIRT_STATIC_DHCP=true")
 }
 
 // cmdRunTerm runs a Cmd, terminating it gracefully when the context is done

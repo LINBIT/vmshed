@@ -165,6 +165,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 	}
 
 	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = virterEnv()
 	cmd.Stderr = &res.testLog
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(suiteRun.testSpec.TestTimeout))

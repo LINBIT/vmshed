@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -324,18 +325,18 @@ func provisionAndExec(cmdName string, suiteRun *testSuiteRun) (int, error) {
 		defer lock.Unlock()
 	}
 
-	// Workaround: When virter first starts it generates a key pair.
-	// However, when we start multiple instances concurrently, they race.
-	// The result is that the VMs start successfully, but then the test can
-	// only connect to one of them. Each VM has been provided a different
-	// key, but the test only has the key that was written last.
-	log.Println("STAGE: Initialize virter")
-	argv := []string{"virter", "image", "ls", "--available"}
-	log.Printf("EXECUTING: %s", argv)
-	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
-		return 1, fmt.Errorf("cannot initialize virter: %w", err)
+	// Note: When virter first starts it generates a key pair. However,
+	// when we start multiple instances concurrently, they race. The result
+	// is that the VMs start successfully, but then the test can only
+	// connect to one of them. Each VM has been provided a different key,
+	// but the test only has the key that was written last. Hence the first
+	// virter command run should not be parallel.
+	err := addNetworkHosts(suiteRun)
+	if err != nil {
+		return 1, err
 	}
 
+	defer removeNetworkHosts(suiteRun)
 	defer removeImages(suiteRun.vmSpec)
 
 	log.Println("STAGE: Scheduler")
@@ -344,6 +345,35 @@ func provisionAndExec(cmdName string, suiteRun *testSuiteRun) (int, error) {
 		return 1, fmt.Errorf("cannot execute tests: %w", err)
 	}
 	return nFailed, nil
+}
+
+func addNetworkHosts(suiteRun *testSuiteRun) error {
+	log.Println("STAGE: Add network host mappings")
+	argv := []string{
+		"virter", "network", "host", "add",
+		"--id", strconv.Itoa(suiteRun.startVM),
+		"--count", strconv.Itoa(suiteRun.nrVMs)}
+	log.Printf("EXECUTING: %s", argv)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = virterEnv()
+	if _, err := cmd.Output(); err != nil {
+		return fmt.Errorf("cannot add network host mappings: %w", err)
+	}
+	return nil
+}
+
+func removeNetworkHosts(suiteRun *testSuiteRun) {
+	log.Println("STAGE: Remove network host mappings")
+	argv := []string{
+		"virter", "network", "host", "rm",
+		"--id", strconv.Itoa(suiteRun.startVM),
+		"--count", strconv.Itoa(suiteRun.nrVMs)}
+	log.Printf("EXECUTING: %s", argv)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = virterEnv()
+	if _, err := cmd.Output(); err != nil {
+		log.Errorf("CLEANUP: cannot remove network host mappings: %v", err)
+	}
 }
 
 func ctxCancled(ctx context.Context) bool {
