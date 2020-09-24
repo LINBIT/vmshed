@@ -188,7 +188,29 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 		}
 	}
 
+	// copy artifacts from VMs
+	if suiteRun.jenkins.IsActive() {
+		for _, vm := range testnodes {
+			for _, directory := range suiteRun.testSpec.Artifacts {
+				// tgtPath will be /outdir/logs/{testname}/{vmname}/copy/path
+				tgtPath := filepath.Join(run.outDir, vm.vmName(), filepath.Dir(directory))
+				os.MkdirAll(tgtPath, 0755)
+				if err := copyDir(vm, directory, tgtPath); err != nil {
+					logger.Printf("ARTIFACTCOPY: FAILED copy artifact directory %s: %s", directory, err.Error())
+				}
+			}
+		}
+	}
+
 	return &res
+}
+
+func copyDir(vm vmInstance, srcDir string, hostDir string) error {
+	args := []string{"virter", "vm", "cp", vm.vmName() + ":" + srcDir, hostDir}
+	fmt.Printf("EXECUTING VIRTER COPY: %s\n", args)
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = virterEnv()
+	return cmd.Run()
 }
 
 func testLogger(out io.Writer, quiet bool) *log.Logger {

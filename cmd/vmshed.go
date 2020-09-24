@@ -56,6 +56,7 @@ type testSpecification struct {
 	TestSuiteFile string      `toml:"test_suite_file"`
 	TestTimeout   duration    `toml:"test_timeout"`
 	TestGroups    []testGroup `toml:"group"`
+	Artifacts     []string    `toml:"artifacts"`
 }
 
 type testSuiteRun struct {
