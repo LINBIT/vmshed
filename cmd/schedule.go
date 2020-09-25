@@ -15,6 +15,7 @@ const (
 	imageNone      imageStage = "None"
 	imageProvision imageStage = "Provision"
 	imageReady     imageStage = "Ready"
+	imageError     imageStage = "Error"
 )
 
 type runStage string
@@ -97,6 +98,10 @@ func scheduleLoop(ctx context.Context, cancel context.CancelFunc, suiteRun *test
 
 	for {
 		for {
+			if runStopping(suiteRun, state) {
+				break
+			}
+
 			nextAction := chooseNextAction(suiteRun, state)
 			if nextAction == nil {
 				break
@@ -122,21 +127,31 @@ func scheduleLoop(ctx context.Context, cancel context.CancelFunc, suiteRun *test
 
 		log.Println("SCHEDULE: Wait for result")
 		r := <-results
+		activeActions--
 		log.Println("SCHEDULE: Apply result for:", r.name())
 		r.updatePost(state)
-		activeActions--
 
-		if suiteRun.failTest && state.errors != nil {
+		if runStopping(suiteRun, state) {
 			cancel()
 		}
 	}
 }
 
-func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
+func runStopping(suiteRun *testSuiteRun, state *suiteState) bool {
 	if suiteRun.failTest && state.errors != nil {
-		return nil
+		return true
 	}
 
+	for _, v := range suiteRun.vmSpec.VMs {
+		if state.imageStage[v.BaseImage] == imageError {
+			return true
+		}
+	}
+
+	return false
+}
+
+func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 	// Ignore IDs which are being used for provisioning when deciding which
 	// test to work towards. This is necessary to ensure that larger tests
 	// are preferred for efficient use of the available IDs.
@@ -294,6 +309,7 @@ func (a *provisionImageAction) updatePost(state *suiteState) {
 	if a.err == nil {
 		state.imageStage[a.v.BaseImage] = imageReady
 	} else {
+		state.imageStage[a.v.BaseImage] = imageError
 		state.errors = append(state.errors,
 			fmt.Errorf("provision %s: %w", a.v.BaseImage, a.err))
 	}

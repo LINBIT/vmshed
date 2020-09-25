@@ -23,7 +23,8 @@ func TestChooseNextAction(t *testing.T) {
 	}
 
 	type step struct {
-		result   action
+		result action
+		// an expected action that is nil indicates that we expect the run to be stopping
 		expected []action
 	}
 
@@ -64,7 +65,8 @@ func TestChooseNextAction(t *testing.T) {
 					expected: []action{&performTestAction{run: &testRun2VM, ids: []int{5, 6}}},
 				},
 				{
-					result: &performTestAction{run: &testRun2VM, ids: []int{5, 6}, err: errors.New("test failed")},
+					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}, err: errors.New("test failed")},
+					expected: []action{nil},
 				},
 			},
 		},
@@ -85,6 +87,7 @@ func TestChooseNextAction(t *testing.T) {
 				},
 				{
 					result: &provisionImageAction{v: &vm0, id: 5},
+					// larger tests are preferred, so do not expect testRun1VM to run yet
 				},
 				{
 					result:   &provisionImageAction{v: &vm1, id: 6},
@@ -93,6 +96,32 @@ func TestChooseNextAction(t *testing.T) {
 				{
 					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}},
 					expected: []action{&performTestAction{run: &testRun1VM, ids: []int{5}}},
+				},
+			},
+		},
+		{
+			name: "provision-fail",
+			suiteRun: testSuiteRun{
+				vmSpec:   &vmSpecification{ProvisionFile: "/p", VMs: []vm{vm0, vm1}},
+				testRuns: []testRun{testRun1VM, testRun2VM},
+				startVM:  5,
+				nrVMs:    2,
+			},
+			sequence: []step{
+				{
+					expected: []action{
+						&provisionImageAction{v: &vm0, id: 5},
+						&provisionImageAction{v: &vm1, id: 6},
+					},
+				},
+				{
+					result: &provisionImageAction{v: &vm0, id: 5},
+					// larger tests are preferred, so do not expect testRun1VM to run yet
+				},
+				{
+					result: &provisionImageAction{v: &vm1, id: 6, err: errors.New("provision fail")},
+					// even though testRun1VM could run, expect suite run to stop due to provisioning failure
+					expected: []action{nil},
 				},
 			},
 		},
@@ -108,7 +137,19 @@ func TestChooseNextAction(t *testing.T) {
 				}
 
 				for _, expected := range step.expected {
+					stopping := runStopping(&test.suiteRun, state)
+					if expected == nil {
+						if !stopping {
+							t.Fatalf("test run not stopping as expected")
+						}
+						break
+					}
+
 					t.Logf("expected action: '%s'", expected.name())
+
+					if stopping {
+						t.Fatalf("test run stopping unexpectedly")
+					}
 
 					actual := chooseNextAction(&test.suiteRun, state)
 
@@ -120,9 +161,11 @@ func TestChooseNextAction(t *testing.T) {
 					actual.updatePre(state)
 				}
 
-				a := chooseNextAction(&test.suiteRun, state)
-				if a != nil {
-					t.Fatalf("unexpected action, actual: '%s'", a.name())
+				if !runStopping(&test.suiteRun, state) {
+					a := chooseNextAction(&test.suiteRun, state)
+					if a != nil {
+						t.Fatalf("unexpected action, actual: '%s'", a.name())
+					}
 				}
 			}
 		})
