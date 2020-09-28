@@ -80,6 +80,12 @@ func provisionImage(ctx context.Context, vmSpec *vmSpecification, overrides []st
 	err := cmdStderrTerm(provisionCtx, logger, cmd)
 	log.Printf("EXECUTIONTIME: Provisioning image %s: %v", newImageName, time.Since(start))
 
+	if ctx.Err() != nil {
+		return fmt.Errorf("canceled")
+	}
+	if provisionCtx.Err() != nil {
+		return fmt.Errorf("timeout: %w", err)
+	}
 	return err
 }
 

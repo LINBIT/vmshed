@@ -278,7 +278,8 @@ func (a *performTestAction) updatePost(state *suiteState) {
 	state.runStage[a.run.testID] = runDone
 	fmt.Fprint(log.StandardLogger().Out, a.report)
 	if a.err != nil {
-		state.errors = append(state.errors, a.err)
+		state.errors = append(state.errors,
+			fmt.Errorf("%s: %w", a.run.testID, a.err))
 	}
 	for _, id := range a.ids {
 		state.freeIDs[id] = true

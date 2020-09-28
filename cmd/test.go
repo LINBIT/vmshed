@@ -41,6 +41,7 @@ type testResult struct {
 	testLog  bytes.Buffer // output of the test itself ('virter vm exec' output)
 	execTime time.Duration
 	err      error
+	timeout  bool
 }
 
 func (r *testResult) ExecTime() time.Duration {
@@ -90,12 +91,24 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	}
 
 	testRes := execTest(ctx, suiteRun, run, vms...)
-	testErr := testRes.err
+
+	stateString := "SUCCESS"
+	var testErr error
+	if ctx.Err() != nil {
+		stateString = "CANCELED"
+		testErr = fmt.Errorf("canceled")
+	} else if testRes.timeout {
+		stateString = "FAILED (TIMEOUT)"
+		testErr = fmt.Errorf("timeout: %w", testRes.err)
+	} else if testRes.err != nil {
+		stateString = "FAILED"
+		testErr = testRes.err
+	}
 
 	var report bytes.Buffer
 
 	fmt.Fprintln(&report, "|===================================================================================================")
-	fmt.Fprintf(&report, "| ** Results for %s - %s\n", run.testID, testStateString(testRes.err))
+	fmt.Fprintf(&report, "| ** Results for %s - %s\n", run.testID, stateString)
 	jobURL := os.Getenv("CI_JOB_URL")
 	if jobURL != "" {
 		fmt.Fprintf(&report, "| ** %s/artifacts/browse/%s\n", jobURL, run.outDir)
@@ -127,13 +140,6 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	fmt.Fprintln(&report, "|===================================================================================================")
 
 	return report.String(), testErr
-}
-
-func testStateString(err error) string {
-	if err != nil {
-		return "FAILED"
-	}
-	return "SUCCESS"
 }
 
 func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnodes ...vmInstance) *testResult {
@@ -180,13 +186,8 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 		exitErr.Stderr = res.testLog.Bytes()
 	}
 
-	if testErr != nil { // "real" error or ctx canceled
-		if ctxErr := testCtx.Err(); ctxErr != nil {
-			res.err = fmt.Errorf("%s: (context error: %v): %w", run.testID, ctxErr, testErr)
-		} else {
-			res.err = fmt.Errorf("%s: %w", run.testID, testErr)
-		}
-	}
+	res.err = testErr
+	res.timeout = testCtx.Err() != nil
 
 	// copy artifacts from VMs
 	if suiteRun.jenkins.IsActive() {
