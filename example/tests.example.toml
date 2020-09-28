@@ -1,5 +1,6 @@
 test_suite_file = "test-run-execute.virter.toml"
 test_timeout = "1m"
+artifacts = [ "/etc/udev" ]
 
 [[group]]
 vms = 2
