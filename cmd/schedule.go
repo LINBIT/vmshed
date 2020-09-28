@@ -47,13 +47,10 @@ type action interface {
 	updatePost(state *suiteState)
 }
 
-func runScheduler(suiteRun *testSuiteRun) (int, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+func runScheduler(ctx context.Context, suiteRun *testSuiteRun) (int, error) {
 	state := initializeState(suiteRun)
 
-	scheduleLoop(ctx, cancel, suiteRun, state)
+	scheduleLoop(ctx, suiteRun, state)
 
 	nErrs := len(state.errors)
 	if nErrs == 0 {
@@ -92,7 +89,10 @@ func initializeState(suiteRun *testSuiteRun) *suiteState {
 	return &state
 }
 
-func scheduleLoop(ctx context.Context, cancel context.CancelFunc, suiteRun *testSuiteRun, state *suiteState) {
+func scheduleLoop(ctx context.Context, suiteRun *testSuiteRun, state *suiteState) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	results := make(chan action)
 	activeActions := 0
 
@@ -301,7 +301,7 @@ func (a *provisionImageAction) updatePre(state *suiteState) {
 }
 
 func (a *provisionImageAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
-	a.err = provisionImage(suiteRun.vmSpec, suiteRun.overrides, a.id, a.v, suiteRun.jenkins)
+	a.err = provisionImage(ctx, suiteRun.vmSpec, suiteRun.overrides, a.id, a.v, suiteRun.jenkins)
 }
 
 func (a *provisionImageAction) updatePost(state *suiteState) {

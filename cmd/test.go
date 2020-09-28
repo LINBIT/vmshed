@@ -144,7 +144,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 
 	// Start VMs
 	start := time.Now()
-	err := startVMs(logger, run, testnodes...)
+	err := startVMs(ctx, logger, run, testnodes...)
 	defer shutdownVMs(logger, testnodes...)
 	if err != nil {
 		res.err = err
@@ -168,12 +168,12 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 	cmd.Env = virterEnv()
 	cmd.Stderr = &res.testLog
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(suiteRun.testSpec.TestTimeout))
+	testCtx, cancel := context.WithTimeout(ctx, time.Duration(suiteRun.testSpec.TestTimeout))
 	defer cancel()
 
 	logger.Printf("EXECUTING TEST: %s", argv)
 	start = time.Now()
-	testErr := cmdRunTerm(ctx, logger, cmd)
+	testErr := cmdRunTerm(testCtx, logger, cmd)
 	logger.Printf("EXECUTIONTIME: Running test %s: %v", run.testID, time.Since(start))
 
 	if exitErr, ok := testErr.(*exec.ExitError); ok {
@@ -181,7 +181,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 	}
 
 	if testErr != nil { // "real" error or ctx canceled
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := testCtx.Err(); ctxErr != nil {
 			res.err = fmt.Errorf("%s: (context error: %v): %w", run.testID, ctxErr, testErr)
 		} else {
 			res.err = fmt.Errorf("%s: %w", run.testID, testErr)
@@ -195,8 +195,9 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 				// tgtPath will be /outdir/logs/{testname}/{vmname}/copy/path
 				tgtPath := filepath.Join(run.outDir, vm.vmName(), filepath.Dir(directory))
 				os.MkdirAll(tgtPath, 0755)
-				if err := copyDir(vm, directory, tgtPath); err != nil {
+				if err := copyDir(logger, vm, directory, tgtPath); err != nil {
 					logger.Printf("ARTIFACTCOPY: FAILED copy artifact directory %s: %s", directory, err.Error())
+					dumpStderr(logger, err)
 				}
 			}
 		}
@@ -205,12 +206,15 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 	return &res
 }
 
-func copyDir(vm vmInstance, srcDir string, hostDir string) error {
+func copyDir(logger log.FieldLogger, vm vmInstance, srcDir string, hostDir string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
 	args := []string{"virter", "vm", "cp", vm.vmName() + ":" + srcDir, hostDir}
-	fmt.Printf("EXECUTING VIRTER COPY: %s\n", args)
+	logger.Printf("EXECUTING VIRTER COPY: %s", args)
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = virterEnv()
-	return cmd.Run()
+	return cmdStderrTerm(ctx, logger, cmd)
 }
 
 func testLogger(out io.Writer, quiet bool) *log.Logger {

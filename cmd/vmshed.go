@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/sethvargo/go-signalcontext"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 
 	"github.com/LINBIT/vmshed/cmd/config"
 )
@@ -181,6 +183,8 @@ func rootCommand() *cobra.Command {
 				log.Printf("PLAN: %s on %s", run.testID, baseImageString)
 			}
 
+			ctx, cancel := signalcontext.On(unix.SIGINT, unix.SIGTERM)
+			defer cancel()
 			start := time.Now()
 
 			suiteRun := testSuiteRun{
@@ -194,7 +198,7 @@ func rootCommand() *cobra.Command {
 				failTest:  failTest,
 				quiet:     quiet,
 			}
-			nFailed, err := provisionAndExec(filepath.Base(os.Args[0]), &suiteRun)
+			nFailed, err := provisionAndExec(ctx, filepath.Base(os.Args[0]), &suiteRun)
 			if err != nil {
 				log.Errorf("ERROR: %v", err)
 				unwrapStderr(err)
@@ -310,30 +314,31 @@ func newTestRun(jenkins *Jenkins, testName string, vms []vm, testIndex int) test
 	return run
 }
 
-func provisionAndExec(cmdName string, suiteRun *testSuiteRun) (int, error) {
+func provisionAndExec(ctx context.Context, cmdName string, suiteRun *testSuiteRun) (int, error) {
 	// Note: When virter first starts it generates a key pair. However,
 	// when we start multiple instances concurrently, they race. The result
 	// is that the VMs start successfully, but then the test can only
 	// connect to one of them. Each VM has been provided a different key,
 	// but the test only has the key that was written last. Hence the first
 	// virter command run should not be parallel.
-	err := addNetworkHosts(suiteRun)
+	err := addNetworkHosts(ctx, suiteRun)
 	if err != nil {
 		return 1, err
 	}
 
 	defer removeNetworkHosts(suiteRun)
+
 	defer removeImages(suiteRun.vmSpec)
 
 	log.Println("STAGE: Scheduler")
-	nFailed, err := runScheduler(suiteRun)
+	nFailed, err := runScheduler(ctx, suiteRun)
 	if err != nil {
 		return 1, fmt.Errorf("cannot execute tests: %w", err)
 	}
 	return nFailed, nil
 }
 
-func addNetworkHosts(suiteRun *testSuiteRun) error {
+func addNetworkHosts(ctx context.Context, suiteRun *testSuiteRun) error {
 	log.Println("STAGE: Add network host mappings")
 	argv := []string{
 		"virter", "network", "host", "add",
@@ -342,7 +347,7 @@ func addNetworkHosts(suiteRun *testSuiteRun) error {
 	log.Printf("EXECUTING: %s", argv)
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv()
-	if _, err := cmd.Output(); err != nil {
+	if err := cmdStderrTerm(ctx, log.StandardLogger(), cmd); err != nil {
 		return fmt.Errorf("cannot add network host mappings: %w", err)
 	}
 	return nil
@@ -350,6 +355,10 @@ func addNetworkHosts(suiteRun *testSuiteRun) error {
 
 func removeNetworkHosts(suiteRun *testSuiteRun) {
 	log.Println("STAGE: Remove network host mappings")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	argv := []string{
 		"virter", "network", "host", "rm",
 		"--id", strconv.Itoa(suiteRun.startVM),
@@ -357,8 +366,9 @@ func removeNetworkHosts(suiteRun *testSuiteRun) {
 	log.Printf("EXECUTING: %s", argv)
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv()
-	if _, err := cmd.Output(); err != nil {
+	if err := cmdStderrTerm(ctx, log.StandardLogger(), cmd); err != nil {
 		log.Errorf("CLEANUP: cannot remove network host mappings: %v", err)
+		dumpStderr(log.StandardLogger(), err)
 	}
 }
 

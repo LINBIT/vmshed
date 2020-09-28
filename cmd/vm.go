@@ -38,8 +38,12 @@ func testIDString(test string, vmCount int, testIndex int) string {
 	return fmt.Sprintf("%s-%d-%d", test, vmCount, testIndex)
 }
 
-func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v *vm, jenkins *Jenkins) error {
+func provisionImage(ctx context.Context, vmSpec *vmSpecification, overrides []string, nr int, v *vm, jenkins *Jenkins) error {
 	newImageName := vmSpec.ImageName(v)
+	logger := log.WithFields(log.Fields{
+		"Action":    "Provision",
+		"ImageName": newImageName,
+	})
 
 	// clean up, should not be neccessary, but hey...
 	argv := []string{"virter", "image", "rm", newImageName}
@@ -47,7 +51,7 @@ func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v *vm, 
 	// this command is idempotent, so even if it does nothing, it returns zero
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv()
-	if err := cmd.Run(); err != nil {
+	if err := cmdStderrTerm(ctx, logger, cmd); err != nil {
 		return err
 	}
 
@@ -68,20 +72,14 @@ func provisionImage(vmSpec *vmSpecification, overrides []string, nr int, v *vm, 
 	cmd = exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv()
 
-	var out bytes.Buffer
-	cmd.Stderr = &out
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(vmSpec.ProvisionTimeout))
+	provisionCtx, cancel := context.WithTimeout(ctx, time.Duration(vmSpec.ProvisionTimeout))
 	defer cancel()
 
 	log.Printf("EXECUTING: %s", argv)
 	start := time.Now()
-	err := cmdRunTerm(ctx, log.StandardLogger(), cmd)
+	err := cmdStderrTerm(provisionCtx, logger, cmd)
 	log.Printf("EXECUTIONTIME: Provisioning image %s: %v", newImageName, time.Since(start))
 
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		exitErr.Stderr = out.Bytes()
-	}
 	return err
 }
 
@@ -91,20 +89,25 @@ func removeImages(vmSpec *vmSpecification) {
 	}
 
 	for _, v := range vmSpec.VMs {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
 		newImageName := vmSpec.ImageName(&v)
 
-		argv := []string{"virter", "image", "rm", newImageName}
+		// remove with "vm rm" in case the build failed leaving the provisioning VM running
+		argv := []string{"virter", "vm", "rm", newImageName}
 		log.Printf("EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Env = virterEnv()
-		if stdouterr, err := cmd.CombinedOutput(); err != nil {
-			log.Errorf("ERROR: Could not remove image %s %v: stdouterr: %s", newImageName, err, stdouterr)
+		if err := cmdStderrTerm(ctx, log.StandardLogger(), cmd); err != nil {
+			log.Errorf("ERROR: Could not remove image %s %v", newImageName, err)
+			dumpStderr(log.StandardLogger(), err)
 			// do not return, keep going...
 		}
 	}
 }
 
-func startVMs(logger *log.Logger, run *testRun, testnodes ...vmInstance) error {
+func startVMs(ctx context.Context, logger *log.Logger, run *testRun, testnodes ...vmInstance) error {
 	var vmStartWait sync.WaitGroup
 	errCh := make(chan error, len(testnodes))
 
@@ -112,7 +115,7 @@ func startVMs(logger *log.Logger, run *testRun, testnodes ...vmInstance) error {
 		vmStartWait.Add(1)
 		go func(vm vmInstance) {
 			defer vmStartWait.Done()
-			if err := runVM(logger, run, vm); err != nil {
+			if err := runVM(ctx, logger, run, vm); err != nil {
 				errCh <- err
 			}
 		}(vm)
@@ -126,7 +129,7 @@ func startVMs(logger *log.Logger, run *testRun, testnodes ...vmInstance) error {
 	return err
 }
 
-func runVM(logger *log.Logger, run *testRun, vm vmInstance) error {
+func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance) error {
 	vmName := vm.vmName()
 
 	// clean up, should not be neccessary, but hey...
@@ -135,7 +138,7 @@ func runVM(logger *log.Logger, run *testRun, vm vmInstance) error {
 	// this command is idempotent, so even if it does nothing, it returns zero
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv()
-	if err := cmd.Run(); err != nil {
+	if err := cmdStderrTerm(ctx, logger, cmd); err != nil {
 		return err
 	}
 
@@ -154,22 +157,23 @@ func runVM(logger *log.Logger, run *testRun, vm vmInstance) error {
 	logger.Printf("EXECUTING: %s", argv)
 	cmd = exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv()
-
-	// use Output to capture stderr if the exit code is non-zero
-	_, err := cmd.Output()
-	return err
+	return cmdStderrTerm(ctx, logger, cmd)
 }
 
 func shutdownVMs(logger *log.Logger, testnodes ...vmInstance) error {
 	for _, vm := range testnodes {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
 		vmName := vm.vmName()
 
 		argv := []string{"virter", "vm", "rm", vmName}
 		logger.Printf("EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Env = virterEnv()
-		if stdouterr, err := cmd.CombinedOutput(); err != nil {
-			logger.Errorf("ERROR: Could not stop VM %s %v: stdouterr: %s", vmName, err, stdouterr)
+		if err := cmdStderrTerm(ctx, logger, cmd); err != nil {
+			logger.Errorf("ERROR: Could not stop VM %s: %v", vmName, err)
+			dumpStderr(logger, err)
 			// do not return, keep going...
 		}
 	}
@@ -181,8 +185,22 @@ func virterEnv() []string {
 	return append(os.Environ(), "LIBVIRT_STATIC_DHCP=true")
 }
 
+// cmdStderrTerm runs a Cmd, collecting stderr and terminating gracefully
+func cmdStderrTerm(ctx context.Context, logger log.FieldLogger, cmd *exec.Cmd) error {
+	var out bytes.Buffer
+	cmd.Stderr = &out
+
+	err := cmdRunTerm(ctx, logger, cmd)
+
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr.Stderr = out.Bytes()
+	}
+
+	return err
+}
+
 // cmdRunTerm runs a Cmd, terminating it gracefully when the context is done
-func cmdRunTerm(ctx context.Context, logger *log.Logger, cmd *exec.Cmd) error {
+func cmdRunTerm(ctx context.Context, logger log.FieldLogger, cmd *exec.Cmd) error {
 	err := cmd.Start()
 	if err != nil {
 		return err
@@ -205,7 +223,7 @@ func cmdRunTerm(ctx context.Context, logger *log.Logger, cmd *exec.Cmd) error {
 	return err
 }
 
-func handleTermination(ctx context.Context, logger *log.Logger, cmd *exec.Cmd, complete <-chan struct{}, finished chan<- struct{}) {
+func handleTermination(ctx context.Context, logger log.FieldLogger, cmd *exec.Cmd, complete <-chan struct{}, finished chan<- struct{}) {
 	select {
 	case <-ctx.Done():
 		logger.Warnln("TERMINATING: Send SIGTERM")
@@ -219,4 +237,10 @@ func handleTermination(ctx context.Context, logger *log.Logger, cmd *exec.Cmd, c
 	case <-complete:
 	}
 	close(finished)
+}
+
+func dumpStderr(logger *log.Logger, err error) {
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		fmt.Fprint(logger.Out, string(exitErr.Stderr))
+	}
 }
