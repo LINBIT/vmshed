@@ -198,14 +198,16 @@ func rootCommand() *cobra.Command {
 				failTest:  failTest,
 				quiet:     quiet,
 			}
-			nFailed, err := provisionAndExec(ctx, filepath.Base(os.Args[0]), &suiteRun)
+			results, err := provisionAndExec(ctx, filepath.Base(os.Args[0]), &suiteRun)
 			if err != nil {
 				log.Errorf("ERROR: %v", err)
 				unwrapStderr(err)
 			}
 
+			exitCode := printSummaryTable(suiteRun, results)
+
 			log.Println("OVERALL EXECUTIONTIME:", time.Since(start))
-			os.Exit(nFailed)
+			os.Exit(exitCode)
 		},
 	}
 
@@ -224,6 +226,32 @@ func rootCommand() *cobra.Command {
 	rootCmd.Flags().Int64VarP(&randomSeed, "seed", "", 0, "The random number generator seed to use. Specifying 0 seeds with the current time (the default)")
 
 	return rootCmd
+}
+
+func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int {
+	exitCode := 0
+	success := 0
+	// count successes
+	for _, testRun := range suiteRun.testRuns {
+		if result, ok := results[testRun.testID]; ok && result.err == nil {
+			success++
+		} else {
+			exitCode = 1
+		}
+	}
+	successRate := (float32(success) / float32(len(suiteRun.testRuns))) * 100
+	log.Println("|===================================================================================================")
+	log.Printf("| ** Results: %d/%d successful (%.2f%%)", success, len(suiteRun.testRuns), successRate)
+	log.Println("|===================================================================================================")
+	for _, testRun := range suiteRun.testRuns {
+		resultString := "SKIPPED"
+		if result, ok := results[testRun.testID]; ok {
+			resultString = result.stateString
+		}
+		log.Printf("| %-20s: %s\n", resultString, testRun.testID)
+	}
+	log.Println("|===================================================================================================")
+	return exitCode
 }
 
 func determineAllTestRuns(jenkins *Jenkins, vmSpec *vmSpecification, testGroups []testGroup, repeats int) ([]testRun, error) {
@@ -314,7 +342,7 @@ func newTestRun(jenkins *Jenkins, testName string, vms []vm, testIndex int) test
 	return run
 }
 
-func provisionAndExec(ctx context.Context, cmdName string, suiteRun *testSuiteRun) (int, error) {
+func provisionAndExec(ctx context.Context, cmdName string, suiteRun *testSuiteRun) (map[string]testResult, error) {
 	// Note: When virter first starts it generates a key pair. However,
 	// when we start multiple instances concurrently, they race. The result
 	// is that the VMs start successfully, but then the test can only
@@ -323,7 +351,7 @@ func provisionAndExec(ctx context.Context, cmdName string, suiteRun *testSuiteRu
 	// virter command run should not be parallel.
 	err := addNetworkHosts(ctx, suiteRun)
 	if err != nil {
-		return 1, err
+		return nil, err
 	}
 
 	defer removeNetworkHosts(suiteRun)
@@ -331,11 +359,8 @@ func provisionAndExec(ctx context.Context, cmdName string, suiteRun *testSuiteRu
 	defer removeImages(suiteRun.vmSpec)
 
 	log.Println("STAGE: Scheduler")
-	nFailed, err := runScheduler(ctx, suiteRun)
-	if err != nil {
-		return 1, fmt.Errorf("cannot execute tests: %w", err)
-	}
-	return nFailed, nil
+	results := runScheduler(ctx, suiteRun)
+	return results, nil
 }
 
 func addNetworkHosts(ctx context.Context, suiteRun *testSuiteRun) error {

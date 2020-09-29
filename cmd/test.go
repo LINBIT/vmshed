@@ -37,26 +37,31 @@ type TestResulter interface {
 // collect information about individual test runs
 // the interface is similar to the log package (which it also uses)
 type testResult struct {
-	log      bytes.Buffer // log messages of the framework (starting test, timing information,...)
-	testLog  bytes.Buffer // output of the test itself ('virter vm exec' output)
-	execTime time.Duration
-	err      error
-	timeout  bool
+	log         bytes.Buffer // log messages of the framework (starting test, timing information,...)
+	testLog     bytes.Buffer // output of the test itself ('virter vm exec' output)
+	execTime    time.Duration
+	err         error
+	timeout     bool
+	stateString string
 }
 
-func (r *testResult) ExecTime() time.Duration {
+func (r testResult) ExecTime() time.Duration {
 	return r.execTime
 }
 
-func (r *testResult) Err() error {
+func (r testResult) Err() error {
 	return r.err
 }
 
-func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids []int) (string, error) {
+func (r testResult) String() string {
+	return r.stateString
+}
+
+func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids []int) (string, testResult) {
 	if run.outDir != "" {
 		err := os.MkdirAll(run.outDir, 0755)
 		if err != nil {
-			return "", err
+			return "", testResult{err: err}
 		}
 	}
 
@@ -92,23 +97,23 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 
 	testRes := execTest(ctx, suiteRun, run, vms...)
 
-	stateString := "SUCCESS"
+	testRes.stateString = "SUCCESS"
 	var testErr error
 	if ctx.Err() != nil {
-		stateString = "CANCELED"
+		testRes.stateString = "CANCELED"
 		testErr = fmt.Errorf("canceled")
 	} else if testRes.timeout {
-		stateString = "FAILED (TIMEOUT)"
+		testRes.stateString = "FAILED (TIMEOUT)"
 		testErr = fmt.Errorf("timeout: %w", testRes.err)
 	} else if testRes.err != nil {
-		stateString = "FAILED"
+		testRes.stateString = "FAILED"
 		testErr = testRes.err
 	}
 
 	var report bytes.Buffer
 
 	fmt.Fprintln(&report, "|===================================================================================================")
-	fmt.Fprintf(&report, "| ** Results for %s - %s\n", run.testID, stateString)
+	fmt.Fprintf(&report, "| ** Results for %s - %s\n", run.testID, testRes.stateString)
 	jobURL := os.Getenv("CI_JOB_URL")
 	if jobURL != "" {
 		fmt.Fprintf(&report, "| ** %s/artifacts/browse/%s\n", jobURL, run.outDir)
@@ -139,10 +144,10 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	}
 	fmt.Fprintln(&report, "|===================================================================================================")
 
-	return report.String(), testErr
+	return report.String(), testRes
 }
 
-func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnodes ...vmInstance) *testResult {
+func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnodes ...vmInstance) testResult {
 	res := testResult{}
 	logger := testLogger(&res.log, suiteRun.quiet)
 
@@ -154,7 +159,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 	defer shutdownVMs(logger, testnodes...)
 	if err != nil {
 		res.err = err
-		return &res
+		return res
 	}
 	logger.Printf("EXECUTIONTIME: Starting VMs: %v", time.Since(start))
 
@@ -204,7 +209,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 		}
 	}
 
-	return &res
+	return res
 }
 
 func copyDir(logger log.FieldLogger, vm vmInstance, srcDir string, hostDir string) error {

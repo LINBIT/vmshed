@@ -29,6 +29,7 @@ const (
 type suiteState struct {
 	imageStage map[string]imageStage
 	runStage   map[string]runStage
+	runResults map[string]testResult
 	freeIDs    map[int]bool
 	errors     []error
 }
@@ -47,7 +48,7 @@ type action interface {
 	updatePost(state *suiteState)
 }
 
-func runScheduler(ctx context.Context, suiteRun *testSuiteRun) (int, error) {
+func runScheduler(ctx context.Context, suiteRun *testSuiteRun) map[string]testResult {
 	state := initializeState(suiteRun)
 
 	scheduleLoop(ctx, suiteRun, state)
@@ -62,13 +63,14 @@ func runScheduler(ctx context.Context, suiteRun *testSuiteRun) (int, error) {
 			unwrapStderr(err)
 		}
 	}
-	return nErrs, nil
+	return state.runResults
 }
 
 func initializeState(suiteRun *testSuiteRun) *suiteState {
 	state := suiteState{
 		imageStage: make(map[string]imageStage),
 		runStage:   make(map[string]runStage),
+		runResults: make(map[string]testResult),
 		freeIDs:    make(map[int]bool),
 	}
 	for _, run := range suiteRun.testRuns {
@@ -258,7 +260,7 @@ type performTestAction struct {
 	run    *testRun
 	ids    []int
 	report string
-	err    error
+	res    testResult
 }
 
 func (a *performTestAction) name() string {
@@ -271,15 +273,16 @@ func (a *performTestAction) updatePre(state *suiteState) {
 }
 
 func (a *performTestAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
-	a.report, a.err = performTest(ctx, suiteRun, a.run, a.ids)
+	a.report, a.res = performTest(ctx, suiteRun, a.run, a.ids)
 }
 
 func (a *performTestAction) updatePost(state *suiteState) {
 	state.runStage[a.run.testID] = runDone
+	state.runResults[a.run.testID] = a.res
 	fmt.Fprint(log.StandardLogger().Out, a.report)
-	if a.err != nil {
+	if a.res.err != nil {
 		state.errors = append(state.errors,
-			fmt.Errorf("%s: %w", a.run.testID, a.err))
+			fmt.Errorf("%s: %w", a.run.testID, a.res.err))
 	}
 	for _, id := range a.ids {
 		state.freeIDs[id] = true

@@ -65,7 +65,7 @@ func TestChooseNextAction(t *testing.T) {
 					expected: []action{&performTestAction{run: &testRun2VM, ids: []int{5, 6}}},
 				},
 				{
-					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}, err: errors.New("test failed")},
+					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}, res: testResult{err: errors.New("test failed")}},
 					expected: []action{nil},
 				},
 			},
