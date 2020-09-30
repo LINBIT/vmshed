@@ -248,7 +248,7 @@ func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int
 		if result, ok := results[testRun.testID]; ok {
 			resultString = result.stateString
 		}
-		log.Printf("| %-20s: %s\n", resultString, testRun.testID)
+		log.Printf("| %-20s: %s", resultString, testRun.testID)
 	}
 	log.Println("|===================================================================================================")
 	return exitCode
