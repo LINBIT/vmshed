@@ -7,3 +7,4 @@ vcpus = 2
 memory = "6G"
 base_image = "centos-7"
 disks = ["name=data,size=5GiB"]
+tags = ["podman"]

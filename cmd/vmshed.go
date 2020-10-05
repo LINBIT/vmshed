@@ -55,10 +55,16 @@ func (s *vmSpecification) ImageName(v *vm) string {
 }
 
 type testSpecification struct {
-	TestSuiteFile string      `toml:"test_suite_file"`
-	TestTimeout   duration    `toml:"test_timeout"`
-	TestGroups    []testGroup `toml:"group"`
-	Artifacts     []string    `toml:"artifacts"`
+	TestSuiteFile string          `toml:"test_suite_file"`
+	TestTimeout   duration        `toml:"test_timeout"`
+	Tests         map[string]test `toml:"tests"`
+	Artifacts     []string        `toml:"artifacts"`
+	Variants      []variant       `toml:"variants"`
+}
+
+type variant struct {
+	Name      string            `toml:"name"`
+	Variables map[string]string `toml:"variables"`
 }
 
 type testSuiteRun struct {
@@ -100,6 +106,7 @@ func rootCommand() *cobra.Command {
 	var quiet bool
 	var jenkinsWS string
 	var version bool
+	var variantsToRun []string
 
 	rootCmd := &cobra.Command{
 		Use:   "vmshed",
@@ -145,30 +152,21 @@ func rootCommand() *cobra.Command {
 			log.Printf("Using random seed: %d", randomSeed)
 			rand.Seed(randomSeed)
 
-			var tests []testGroup
-			for _, test := range testSpec.TestGroups {
-				if toRun != "all" && toRun != "" { //filter tests
-					idx := 0
-					for _, tn := range test.Tests {
-						for _, vt := range strings.Split(toRun, ",") {
-							if tn == vt {
-								test.Tests[idx] = tn
-								idx++
-							}
-						}
+			for testName := range testSpec.Tests {
+				if toRun != "all" && toRun != "" { //filter tests to Run
+					if !containsString(strings.Split(toRun, ","), testName) {
+						delete(testSpec.Tests, testName)
 					}
-					test.Tests = test.Tests[:idx]
 				}
-
-				if len(test.Tests) == 0 {
-					continue
-				}
-
-				tests = append(tests, test)
 			}
-			testSpec.TestGroups = tests
 
-			testRuns, err := determineAllTestRuns(jenkins, &vmSpec, tests, repeats)
+			variants := testSpec.Variants
+			if len(testSpec.Variants) == 0 {
+				// add default variant
+				variants = append(variants, variant{Name: "default"})
+			}
+
+			testRuns, err := determineAllTestRuns(jenkins, &vmSpec, testSpec.Tests, variants, variantsToRun, repeats)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -224,6 +222,7 @@ func rootCommand() *cobra.Command {
 	rootCmd.Flags().StringVarP(&jenkinsWS, "jenkins", "", "", "If this is set to a path for the current job, text output is saved to files, logs get copied,...")
 	rootCmd.Flags().BoolVarP(&version, "version", "", false, "Print version and exit")
 	rootCmd.Flags().Int64VarP(&randomSeed, "seed", "", 0, "The random number generator seed to use. Specifying 0 seeds with the current time (the default)")
+	rootCmd.Flags().StringSliceVarP(&variantsToRun, "variant", "", []string{}, "which variant to run (defaults to all)")
 
 	return rootCmd
 }
@@ -254,62 +253,77 @@ func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int
 	return exitCode
 }
 
-func determineAllTestRuns(jenkins *Jenkins, vmSpec *vmSpecification, testGroups []testGroup, repeats int) ([]testRun, error) {
+func determineAllTestRuns(
+	jenkins *Jenkins,
+	vmSpec *vmSpecification,
+	tests map[string]test,
+	variants []variant,
+	variantToRun []string,
+	repeats int) ([]testRun, error) {
 	testRuns := []testRun{}
-	for _, testGrp := range testGroups {
-		for _, t := range testGrp.Tests {
-			runs, err := determineRunsForTest(jenkins, vmSpec, testGrp, t, repeats)
-			if err != nil {
-				return nil, err
-			}
-			testRuns = append(testRuns, runs...)
+	for testName, test := range tests {
+		runs, err := determineRunsForTest(jenkins, vmSpec, testName, test, variants, variantToRun, repeats)
+		if err != nil {
+			return nil, err
 		}
+		testRuns = append(testRuns, runs...)
 	}
 	return testRuns, nil
 }
 
-func determineRunsForTest(jenkins *Jenkins, vmSpec *vmSpecification, testGrp testGroup, testName string, repeats int) ([]testRun, error) {
+func determineRunsForTest(
+	jenkins *Jenkins,
+	vmSpec *vmSpecification,
+	testName string,
+	test test,
+	variants []variant,
+	variantsToRun []string,
+	repeats int) ([]testRun, error) {
+
 	testRuns := []testRun{}
 
-	needsSameVMs := false
-	for _, s := range testGrp.SameVMs {
-		if s == testName {
-			needsSameVMs = true
-			break
-		}
-	}
+	needsSameVMs := test.SameVMs
+	needsAllPlatforms := test.NeedAllPlatforms
 
-	needsAllPlatforms := false
-	for _, a := range testGrp.NeedAllPlatforms {
-		if a == testName {
-			needsAllPlatforms = true
-			break
+	for _, variant := range variants {
+		// filter variantsToRun parameter
+		if len(variantsToRun) > 0 {
+			if !containsString(variantsToRun, variant.Name) {
+				continue
+			}
 		}
-	}
 
-	for repeatCounter := 0; repeatCounter < repeats; repeatCounter++ {
-		if needsAllPlatforms {
-			for _, v := range vmSpec.VMs {
-				testRuns = append(testRuns, newTestRun(
-					jenkins, testName, repeatVM(v, testGrp.NrVMs), len(testRuns)))
-			}
-		} else if needsSameVMs {
-			v, err := randomVM(vmSpec.VMs)
-			if err != nil {
-				return nil, err
-			}
-			testRuns = append(testRuns, newTestRun(
-				jenkins, testName, repeatVM(v, testGrp.NrVMs), len(testRuns)))
-		} else {
-			var vms []vm
-			for i := 0; i < testGrp.NrVMs; i++ {
-				v, err := randomVM(vmSpec.VMs)
-				if err != nil {
-					return nil, err
+		// only add variants that are selected
+		if len(test.Variants) > 0 && !containsString(test.Variants, variant.Name) {
+			continue
+		}
+
+		for _, vmCount := range test.VMCount {
+			for repeatCounter := 0; repeatCounter < repeats; repeatCounter++ {
+				if needsAllPlatforms {
+					for _, v := range matchingVMTags(vmSpec.VMs, test.Tags) {
+						testRuns = append(testRuns, newTestRun(
+							jenkins, testName, variant, repeatVM(v, vmCount), len(testRuns)))
+					}
+				} else if needsSameVMs {
+					v, err := randomVMWithTags(vmSpec.VMs, test.Tags)
+					if err != nil {
+						return nil, err
+					}
+					testRuns = append(testRuns, newTestRun(
+						jenkins, testName, variant, repeatVM(v, vmCount), len(testRuns)))
+				} else {
+					var vms []vm
+					for i := 0; i < vmCount; i++ {
+						v, err := randomVMWithTags(vmSpec.VMs, test.Tags)
+						if err != nil {
+							return nil, err
+						}
+						vms = append(vms, v)
+					}
+					testRuns = append(testRuns, newTestRun(jenkins, testName, variant, vms, len(testRuns)))
 				}
-				vms = append(vms, v)
 			}
-			testRuns = append(testRuns, newTestRun(jenkins, testName, vms, len(testRuns)))
 		}
 	}
 
@@ -325,14 +339,48 @@ func repeatVM(v vm, count int) []vm {
 }
 
 func randomVM(vms []vm) (vm, error) {
+	if len(vms) == 0 {
+		return vm{}, fmt.Errorf("Unable to random VM from empty array")
+	}
 	return vms[rand.Int63n(int64(len(vms)))], nil
 }
 
-func newTestRun(jenkins *Jenkins, testName string, vms []vm, testIndex int) testRun {
+func containsString(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
+}
+
+func matchingVMTags(vms []vm, tags []string) []vm {
+	possibleVMs := []vm{}
+	for _, vm := range vms {
+		hasAllTags := true
+		for _, tag := range tags {
+			if !containsString(vm.Tags, tag) {
+				hasAllTags = false
+				break
+			}
+		}
+		if hasAllTags {
+			possibleVMs = append(possibleVMs, vm)
+		}
+	}
+	return possibleVMs
+}
+
+func randomVMWithTags(vms []vm, tags []string) (vm, error) {
+	return randomVM(matchingVMTags(vms, tags))
+}
+
+func newTestRun(jenkins *Jenkins, testName string, variant variant, vms []vm, testIndex int) testRun {
 	run := testRun{
 		testName: testName,
-		testID:   testIDString(testName, len(vms), testIndex),
+		testID:   testIDString(testName, len(vms), testIndex, variant.Name),
 		vms:      vms,
+		variant:  variant,
 	}
 
 	if jenkins.IsActive() {

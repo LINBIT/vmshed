@@ -15,11 +15,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type testGroup struct {
-	NrVMs            int      `toml:"vms"`
-	Tests            []string `toml:"tests"`
-	SameVMs          []string `toml:"samevms"`          // tests that need the same Distribution
-	NeedAllPlatforms []string `toml:"needallplatforms"` // tests that need to run on all platforms
+type test struct {
+	VMCount          []int    `toml:"vms"`
+	Tags             []string `toml:"tags"`
+	SameVMs          bool     `toml:"samevms"`          // test need the same Distribution
+	NeedAllPlatforms bool     `toml:"needallplatforms"` // test need to run on all platforms
+	Variants         []string `toml:"variants"`         // only run on given variants, if empty all
 }
 
 type testRun struct {
@@ -27,6 +28,7 @@ type testRun struct {
 	testID   string
 	outDir   string
 	vms      []vm
+	variant  variant
 }
 
 type TestResulter interface {
@@ -170,6 +172,10 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 		"--set", testNameEnv}
 	for _, override := range suiteRun.overrides {
 		argv = append(argv, "--set", override)
+	}
+	// variant variables
+	for key, value := range run.variant.Variables {
+		argv = append(argv, "--set", "values."+key+"="+value)
 	}
 	for _, vm := range testnodes {
 		argv = append(argv, vm.vmName())

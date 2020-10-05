@@ -20,6 +20,7 @@ type vm struct {
 	Memory    string            `toml:"memory"`
 	VCPUs     uint              `toml:"vcpus"`
 	Disks     []string          `toml:"disks"`
+	Tags      []string          `toml:"tags"`
 }
 
 type vmInstance struct {
@@ -34,8 +35,8 @@ func (vm vmInstance) vmName() string {
 	return fmt.Sprintf("lbtest-vm-%d", vm.nr)
 }
 
-func testIDString(test string, vmCount int, testIndex int) string {
-	return fmt.Sprintf("%s-%d-%d", test, vmCount, testIndex)
+func testIDString(test string, vmCount int, testIndex int, variantName string) string {
+	return fmt.Sprintf("%s-%d-%d-%s", test, vmCount, testIndex, variantName)
 }
 
 func provisionImage(ctx context.Context, vmSpec *vmSpecification, overrides []string, nr int, v *vm, jenkins *Jenkins) error {

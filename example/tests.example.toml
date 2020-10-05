@@ -2,9 +2,16 @@ test_suite_file = "test-run-execute.virter.toml"
 test_timeout = "1m"
 artifacts = [ "/etc/udev" ]
 
-[[group]]
-vms = 2
-tests = [
-  "example_test_a",
-  "example_test_b",
-]
+[[variants]]
+# every variant needs a "name"
+name = "default"
+variables = {dbtype = "mariadb"}
+
+[tests]
+[tests.example_test_a]
+vms = [2]
+tags = ["podman"]
+
+[tests.example_test_b]
+vms = [2]
+tags = ["podman"]
