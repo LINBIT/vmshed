@@ -125,10 +125,12 @@ func rootCommand() *cobra.Command {
 				log.Fatal("--nvms has to be positive")
 			}
 
-			jenkins, err := NewJenkins(jenkinsWS)
-			if err != nil {
-				log.Fatal(err)
+			if randomSeed == 0 {
+				randomSeed = time.Now().UTC().UnixNano()
 			}
+
+			log.Printf("Using random seed: %d", randomSeed)
+			rand.Seed(randomSeed)
 
 			var vmSpec vmSpecification
 			if _, err := toml.DecodeFile(vmSpecPath, &vmSpec); err != nil {
@@ -145,57 +147,21 @@ func rootCommand() *cobra.Command {
 			testSpec.TestSuiteFile = joinIfRel(filepath.Dir(testSpecPath), testSpec.TestSuiteFile)
 			testSpec.TestTimeout = durationDefault(testSpec.TestTimeout, 5*time.Minute)
 
-			if randomSeed == 0 {
-				randomSeed = time.Now().UTC().UnixNano()
-			}
-
-			log.Printf("Using random seed: %d", randomSeed)
-			rand.Seed(randomSeed)
-
-			for testName := range testSpec.Tests {
-				if toRun != "all" && toRun != "" { //filter tests to Run
-					if !containsString(strings.Split(toRun, ","), testName) {
-						delete(testSpec.Tests, testName)
-					}
-				}
-			}
-
-			variants := testSpec.Variants
-			if len(testSpec.Variants) == 0 {
-				// add default variant
-				variants = append(variants, variant{Name: "default"})
-			}
-
-			testRuns, err := determineAllTestRuns(jenkins, &vmSpec, testSpec.Tests, variants, variantsToRun, repeats)
+			suiteRun, err := createTestSuiteRun(vmSpec, testSpec, baseImages, toRun, jenkinsWS, repeats, variantsToRun)
 			if err != nil {
 				log.Fatal(err)
 			}
-			vmSpec.VMs = removeUnusedVMs(vmSpec.VMs, testRuns)
 
-			for _, run := range testRuns {
-				baseImages := make([]string, len(run.vms))
-				for i, v := range run.vms {
-					baseImages[i] = v.BaseImage
-				}
-				baseImageString := strings.Join(baseImages, ",")
-				log.Printf("PLAN: %s on %s", run.testID, baseImageString)
-			}
+			suiteRun.overrides = provisionOverrides
+			suiteRun.startVM = startVM
+			suiteRun.nrVMs = nrVMs
+			suiteRun.failTest = failTest
+			suiteRun.quiet = quiet
 
 			ctx, cancel := signalcontext.On(unix.SIGINT, unix.SIGTERM)
 			defer cancel()
 			start := time.Now()
 
-			suiteRun := testSuiteRun{
-				vmSpec:    &vmSpec,
-				testSpec:  &testSpec,
-				overrides: provisionOverrides,
-				jenkins:   jenkins,
-				testRuns:  testRuns,
-				startVM:   startVM,
-				nrVMs:     nrVMs,
-				failTest:  failTest,
-				quiet:     quiet,
-			}
 			results, err := provisionAndExec(ctx, filepath.Base(os.Args[0]), &suiteRun)
 			if err != nil {
 				log.Errorf("ERROR: %v", err)
@@ -225,6 +191,59 @@ func rootCommand() *cobra.Command {
 	rootCmd.Flags().StringSliceVarP(&variantsToRun, "variant", "", []string{}, "which variant to run (defaults to all)")
 
 	return rootCmd
+}
+
+func createTestSuiteRun(
+	vmSpec vmSpecification,
+	testSpec testSpecification,
+	baseImages []string,
+	toRun string,
+	jenkinsWS string,
+	repeats int,
+	variantsToRun []string) (testSuiteRun, error) {
+
+	jenkins, err := NewJenkins(jenkinsWS)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for testName := range testSpec.Tests {
+		if toRun != "all" && toRun != "" { //filter tests to Run
+			if !containsString(strings.Split(toRun, ","), testName) {
+				delete(testSpec.Tests, testName)
+			}
+		}
+	}
+
+	variants := testSpec.Variants
+	if len(testSpec.Variants) == 0 {
+		// add default variant
+		variants = append(variants, variant{Name: "default"})
+	}
+
+	testRuns, err := determineAllTestRuns(jenkins, &vmSpec, testSpec.Tests, variants, variantsToRun, repeats)
+	if err != nil {
+		log.Fatal(err)
+	}
+	vmSpec.VMs = removeUnusedVMs(vmSpec.VMs, testRuns)
+
+	for _, run := range testRuns {
+		baseImages := make([]string, len(run.vms))
+		for i, v := range run.vms {
+			baseImages[i] = v.BaseImage
+		}
+		baseImageString := strings.Join(baseImages, ",")
+		log.Printf("PLAN: %s on %s", run.testID, baseImageString)
+	}
+
+	suiteRun := testSuiteRun{
+		vmSpec:   &vmSpec,
+		testSpec: &testSpec,
+		jenkins:  jenkins,
+		testRuns: testRuns,
+	}
+
+	return suiteRun, nil
 }
 
 func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int {
