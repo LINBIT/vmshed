@@ -145,6 +145,9 @@ func rootCommand() *cobra.Command {
 			if _, err := toml.DecodeFile(testSpecPath, &testSpec); err != nil {
 				log.Fatal(err)
 			}
+			if testSpec.TestSuiteFile == "" {
+				testSpec.TestSuiteFile = "run.toml"
+			}
 			testSpec.TestSuiteFile = joinIfRel(filepath.Dir(testSpecPath), testSpec.TestSuiteFile)
 			testSpec.TestTimeout = durationDefault(testSpec.TestTimeout, 5*time.Minute)
 
