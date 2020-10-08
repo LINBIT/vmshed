@@ -101,10 +101,28 @@ func TestDeterminedTests(t *testing.T) {
 			tags = ['zfs']`,
 			repeats: 1,
 			testIds: testSchedules{
-				"test_list_commands-1-0-default": []string{},
-				"test_list_commands-2-1-default": []string{},
-				"test_zfs_disk2_diskless1-3-0-default": []string{
+				"test_list_commands-1-default-0": []string{},
+				"test_list_commands-2-default-0": []string{},
+				"test_zfs_disk2_diskless1-3-default-0": []string{
 					"ubuntu-bionic-linstor-k109", "ubuntu-focal-linstor-k40"},
+			},
+		},
+		{
+			name:   "repeats",
+			vmSpec: vmSpecToml,
+			testSpec: `test_suite_file = "run.toml"
+
+			[tests]
+			[tests.test_list_commands]
+			vms = [1, 2]`,
+			repeats: 3,
+			testIds: testSchedules{
+				"test_list_commands-1-default-0": []string{},
+				"test_list_commands-1-default-1": []string{},
+				"test_list_commands-1-default-2": []string{},
+				"test_list_commands-2-default-0": []string{},
+				"test_list_commands-2-default-1": []string{},
+				"test_list_commands-2-default-2": []string{},
 			},
 		},
 		{
@@ -131,9 +149,9 @@ func TestDeterminedTests(t *testing.T) {
 			repeats: 1,
 			toRun:   "test_list_commands,test_auto_place_replicas_on_same",
 			testIds: testSchedules{
-				"test_list_commands-1-0-default":               []string{},
-				"test_list_commands-2-1-default":               []string{},
-				"test_auto_place_replicas_on_same-4-0-default": []string{},
+				"test_list_commands-1-default-0":               []string{},
+				"test_list_commands-2-default-0":               []string{},
+				"test_auto_place_replicas_on_same-4-default-0": []string{},
 			},
 		},
 		{
@@ -154,10 +172,10 @@ func TestDeterminedTests(t *testing.T) {
 			vms = [1, 2]`,
 			repeats: 1,
 			testIds: testSchedules{
-				"test_list_commands-1-0-default": []string{},
-				"test_list_commands-1-2-etcd":    []string{},
-				"test_list_commands-2-1-default": []string{},
-				"test_list_commands-2-3-etcd":    []string{},
+				"test_list_commands-1-default-0": []string{},
+				"test_list_commands-1-etcd-0":    []string{},
+				"test_list_commands-2-default-0": []string{},
+				"test_list_commands-2-etcd-0":    []string{},
 			},
 		},
 		{
@@ -179,8 +197,8 @@ func TestDeterminedTests(t *testing.T) {
 			repeats:  1,
 			variants: []string{"etcd"},
 			testIds: testSchedules{
-				"test_list_commands-1-0-etcd": []string{},
-				"test_list_commands-2-1-etcd": []string{},
+				"test_list_commands-1-etcd-0": []string{},
+				"test_list_commands-2-etcd-0": []string{},
 			},
 		},
 	}

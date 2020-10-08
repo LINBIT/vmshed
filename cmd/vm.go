@@ -35,8 +35,8 @@ func (vm vmInstance) vmName() string {
 	return fmt.Sprintf("lbtest-vm-%d", vm.nr)
 }
 
-func testIDString(test string, vmCount int, testIndex int, variantName string) string {
-	return fmt.Sprintf("%s-%d-%d-%s", test, vmCount, testIndex, variantName)
+func testIDString(test string, vmCount int, variantName string, testIndex int) string {
+	return fmt.Sprintf("%s-%d-%s-%d", test, vmCount, variantName, testIndex)
 }
 
 func provisionImage(ctx context.Context, vmSpec *vmSpecification, overrides []string, nr int, v *vm, jenkins *Jenkins) error {

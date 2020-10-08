@@ -80,6 +80,14 @@ type testSuiteRun struct {
 	quiet     bool
 }
 
+type testConfig struct {
+	jenkins  *Jenkins
+	vmSpec   *vmSpecification
+	testName string
+	test     test
+	repeats  int
+}
+
 // Execute runs vmshed
 func Execute() {
 	log.SetFormatter(&log.TextFormatter{
@@ -226,13 +234,9 @@ func createTestSuiteRun(
 		}
 	}
 
-	variants := testSpec.Variants
-	if len(testSpec.Variants) == 0 {
-		// add default variant
-		variants = append(variants, variant{Name: "default"})
-	}
+	testSpec.Variants = filterVariants(testSpec.Variants, variantsToRun)
 
-	testRuns, err := determineAllTestRuns(jenkins, &vmSpec, testSpec.Tests, variants, variantsToRun, repeats)
+	testRuns, err := determineAllTestRuns(jenkins, &vmSpec, &testSpec, repeats)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -317,16 +321,41 @@ func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int
 	return exitCode
 }
 
+func filterVariants(variants []variant, variantsToRun []string) []variant {
+	if len(variants) == 0 {
+		// just the default variant
+		return []variant{{Name: "default"}}
+	}
+
+	if len(variantsToRun) == 0 {
+		return variants
+	}
+
+	var selectedVariants []variant
+	for _, variant := range variants {
+		if containsString(variantsToRun, variant.Name) {
+			selectedVariants = append(selectedVariants, variant)
+		}
+	}
+	return selectedVariants
+}
+
 func determineAllTestRuns(
 	jenkins *Jenkins,
 	vmSpec *vmSpecification,
-	tests map[string]test,
-	variants []variant,
-	variantToRun []string,
+	testSpec *testSpecification,
 	repeats int) ([]testRun, error) {
+
 	testRuns := []testRun{}
-	for testName, test := range tests {
-		runs, err := determineRunsForTest(jenkins, vmSpec, testName, test, variants, variantToRun, repeats)
+	for testName, test := range testSpec.Tests {
+		config := testConfig{
+			jenkins:  jenkins,
+			vmSpec:   vmSpec,
+			testName: testName,
+			test:     test,
+			repeats:  repeats,
+		}
+		runs, err := determineRunsForTest(&config, testSpec.Variants)
 		if err != nil {
 			return nil, err
 		}
@@ -335,59 +364,53 @@ func determineAllTestRuns(
 	return testRuns, nil
 }
 
-func determineRunsForTest(
-	jenkins *Jenkins,
-	vmSpec *vmSpecification,
-	testName string,
-	test test,
-	variants []variant,
-	variantsToRun []string,
-	repeats int) ([]testRun, error) {
-
+func determineRunsForTest(config *testConfig, variants []variant) ([]testRun, error) {
 	testRuns := []testRun{}
 
-	needsSameVMs := test.SameVMs
-	needsAllPlatforms := test.NeedAllPlatforms
-
 	for _, variant := range variants {
-		// filter variantsToRun parameter
-		if len(variantsToRun) > 0 {
-			if !containsString(variantsToRun, variant.Name) {
-				continue
-			}
-		}
-
 		// only add variants that are selected
-		if len(test.Variants) > 0 && !containsString(test.Variants, variant.Name) {
+		if len(config.test.Variants) > 0 && !containsString(config.test.Variants, variant.Name) {
 			continue
 		}
 
-		for _, vmCount := range test.VMCount {
-			for repeatCounter := 0; repeatCounter < repeats; repeatCounter++ {
-				if needsAllPlatforms {
-					for _, v := range matchingVMTags(vmSpec.VMs, test.Tags) {
-						testRuns = append(testRuns, newTestRun(
-							jenkins, testName, variant, repeatVM(v, vmCount), len(testRuns)))
-					}
-				} else if needsSameVMs {
-					v, err := randomVMWithTags(vmSpec.VMs, test.Tags)
-					if err != nil {
-						return nil, err
-					}
-					testRuns = append(testRuns, newTestRun(
-						jenkins, testName, variant, repeatVM(v, vmCount), len(testRuns)))
-				} else {
-					var vms []vm
-					for i := 0; i < vmCount; i++ {
-						v, err := randomVMWithTags(vmSpec.VMs, test.Tags)
-						if err != nil {
-							return nil, err
-						}
-						vms = append(vms, v)
-					}
-					testRuns = append(testRuns, newTestRun(jenkins, testName, variant, vms, len(testRuns)))
-				}
+		for _, vmCount := range config.test.VMCount {
+			variantRuns, err := determineRunsForTestVariant(config, vmCount, variant)
+			if err != nil {
+				return []testRun{}, err
 			}
+			testRuns = append(testRuns, variantRuns...)
+		}
+	}
+
+	return testRuns, nil
+}
+
+func determineRunsForTestVariant(config *testConfig, vmCount int, testVariant variant) ([]testRun, error) {
+	testRuns := []testRun{}
+
+	for repeatCounter := 0; repeatCounter < config.repeats; repeatCounter++ {
+		if config.test.NeedAllPlatforms {
+			for _, v := range matchingVMTags(config) {
+				testRuns = append(testRuns, newTestRun(
+					config, testVariant, repeatVM(v, vmCount), len(testRuns)))
+			}
+		} else if config.test.SameVMs {
+			v, err := randomVMWithTags(config)
+			if err != nil {
+				return nil, err
+			}
+			testRuns = append(testRuns, newTestRun(
+				config, testVariant, repeatVM(v, vmCount), len(testRuns)))
+		} else {
+			var vms []vm
+			for i := 0; i < vmCount; i++ {
+				v, err := randomVMWithTags(config)
+				if err != nil {
+					return nil, err
+				}
+				vms = append(vms, v)
+			}
+			testRuns = append(testRuns, newTestRun(config, testVariant, vms, len(testRuns)))
 		}
 	}
 
@@ -418,11 +441,11 @@ func containsString(s []string, e string) bool {
 	return false
 }
 
-func matchingVMTags(vms []vm, tags []string) []vm {
+func matchingVMTags(config *testConfig) []vm {
 	possibleVMs := []vm{}
-	for _, vm := range vms {
+	for _, vm := range config.vmSpec.VMs {
 		hasAllTags := true
-		for _, tag := range tags {
+		for _, tag := range config.test.Tags {
 			if !containsString(vm.Tags, tag) {
 				hasAllTags = false
 				break
@@ -435,20 +458,20 @@ func matchingVMTags(vms []vm, tags []string) []vm {
 	return possibleVMs
 }
 
-func randomVMWithTags(vms []vm, tags []string) (vm, error) {
-	return randomVM(matchingVMTags(vms, tags))
+func randomVMWithTags(config *testConfig) (vm, error) {
+	return randomVM(matchingVMTags(config))
 }
 
-func newTestRun(jenkins *Jenkins, testName string, variant variant, vms []vm, testIndex int) testRun {
+func newTestRun(config *testConfig, variant variant, vms []vm, testIndex int) testRun {
 	run := testRun{
-		testName: testName,
-		testID:   testIDString(testName, len(vms), testIndex, variant.Name),
+		testName: config.testName,
+		testID:   testIDString(config.testName, len(vms), variant.Name, testIndex),
 		vms:      vms,
 		variant:  variant,
 	}
 
-	if jenkins.IsActive() {
-		run.outDir = jenkins.SubDir(filepath.Join("log", run.testID))
+	if config.jenkins.IsActive() {
+		run.outDir = config.jenkins.SubDir(filepath.Join("log", run.testID))
 	}
 
 	return run
