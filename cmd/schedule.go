@@ -100,7 +100,7 @@ func scheduleLoop(ctx context.Context, suiteRun *testSuiteRun, state *suiteState
 
 	for {
 		for {
-			if runStopping(suiteRun, state) {
+			if runStopping(suiteRun, state) || ctx.Err() != nil {
 				break
 			}
 
