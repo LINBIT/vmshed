@@ -89,7 +89,10 @@ func (j *Jenkins) XMLLog(restultsDir, testName string, testRes TestResulter, tes
 	f.Write(re.ReplaceAllLiteral(testLog, []byte{' '}))
 	f.WriteString("]]></system-out>\n")
 	if nrFailed > 0 {
-		f.WriteString("<failure message=\"FAILED\"/>\n")
+		f.WriteString("<failure message=\"" + testRes.Err().Error() + "\">\n")
+		f.WriteString("<![CDATA[\n")
+		f.Write(re.ReplaceAllLiteral(testLog, []byte{' '}))
+		f.WriteString("]]>\n</failure>\n")
 	}
 	f.WriteString("</testcase></testsuite>")
 
