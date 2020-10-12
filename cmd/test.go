@@ -31,6 +31,16 @@ type testRun struct {
 	variant  variant
 }
 
+type TestStatus string
+
+const (
+	StatusSkipped       TestStatus = "SKIPPED"
+	StatusSuccess       TestStatus = "SUCCESS"
+	StatusCanceled      TestStatus = "CANCELED"
+	StatusFailedTimeout TestStatus = "FAILED (TIMEOUT)"
+	StatusFailed        TestStatus = "FAILED"
+)
+
 type TestResulter interface {
 	ExecTime() time.Duration
 	Err() error
@@ -39,12 +49,12 @@ type TestResulter interface {
 // collect information about individual test runs
 // the interface is similar to the log package (which it also uses)
 type testResult struct {
-	log         bytes.Buffer // log messages of the framework (starting test, timing information,...)
-	testLog     bytes.Buffer // output of the test itself ('virter vm exec' output)
-	execTime    time.Duration
-	err         error
-	timeout     bool
-	stateString string
+	log      bytes.Buffer // log messages of the framework (starting test, timing information,...)
+	testLog  bytes.Buffer // output of the test itself ('virter vm exec' output)
+	execTime time.Duration
+	err      error
+	timeout  bool
+	status   TestStatus
 }
 
 func (r testResult) ExecTime() time.Duration {
@@ -56,7 +66,7 @@ func (r testResult) Err() error {
 }
 
 func (r testResult) String() string {
-	return r.stateString
+	return string(r.status)
 }
 
 func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids []int) (string, testResult) {
@@ -99,23 +109,23 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 
 	testRes := execTest(ctx, suiteRun, run, vms...)
 
-	testRes.stateString = "SUCCESS"
+	testRes.status = StatusSuccess
 	var testErr error
 	if ctx.Err() != nil {
-		testRes.stateString = "CANCELED"
+		testRes.status = StatusCanceled
 		testErr = fmt.Errorf("canceled")
 	} else if testRes.timeout {
-		testRes.stateString = "FAILED (TIMEOUT)"
+		testRes.status = StatusFailedTimeout
 		testErr = fmt.Errorf("timeout: %w", testRes.err)
 	} else if testRes.err != nil {
-		testRes.stateString = "FAILED"
+		testRes.status = StatusFailed
 		testErr = testRes.err
 	}
 
 	var report bytes.Buffer
 
 	fmt.Fprintln(&report, "|===================================================================================================")
-	fmt.Fprintf(&report, "| ** Results for %s - %s\n", run.testID, testRes.stateString)
+	fmt.Fprintf(&report, "| ** Results for %s - %s\n", run.testID, testRes.status)
 	jobURL := os.Getenv("CI_JOB_URL")
 	if jobURL != "" {
 		fmt.Fprintf(&report, "| ** %s/artifacts/browse/%s\n", jobURL, run.outDir)
@@ -191,7 +201,8 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 	logger.Printf("EXECUTING TEST: %s", argv)
 	start = time.Now()
 	testErr := cmdRunTerm(testCtx, logger, cmd)
-	logger.Printf("EXECUTIONTIME: Running test %s: %v", run.testID, time.Since(start))
+	res.execTime = time.Since(start)
+	logger.Printf("EXECUTIONTIME: Running test %s: %v", run.testID, res.execTime)
 
 	if exitErr, ok := testErr.(*exec.ExitError); ok {
 		exitErr.Stderr = res.testLog.Bytes()

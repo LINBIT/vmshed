@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
@@ -261,40 +260,6 @@ func createTestSuiteRun(
 	return suiteRun, nil
 }
 
-func saveResultsJSON(jenkins *Jenkins, suiteRun testSuiteRun, results map[string]testResult) error {
-	type resultData struct {
-		ID    string `json:"id"`
-		State string `json:"state"`
-	}
-
-	filename := jenkins.SubDir("results.json")
-	log.Printf("Saving results as JSON to %s", filename)
-	dest, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("Failed to create results JSON file: %w", err)
-	}
-
-	var allResults []resultData
-	for _, testRun := range suiteRun.testRuns {
-		resultString := "SKIPPED"
-		if result, ok := results[testRun.testID]; ok {
-			resultString = result.stateString
-		}
-
-		allResults = append(allResults, resultData{
-			ID:    testRun.testID,
-			State: resultString,
-		})
-
-	}
-	err = json.NewEncoder(dest).Encode(&allResults)
-	if err != nil {
-		return fmt.Errorf("failed to encode results JSON: %w", err)
-	}
-
-	return nil
-}
-
 func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int {
 	exitCode := 0
 	success := 0
@@ -311,11 +276,11 @@ func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int
 	log.Printf("| ** Results: %d/%d successful (%.2f%%)", success, len(suiteRun.testRuns), successRate)
 	log.Println("|===================================================================================================")
 	for _, testRun := range suiteRun.testRuns {
-		resultString := "SKIPPED"
+		status := StatusSkipped
 		if result, ok := results[testRun.testID]; ok {
-			resultString = result.stateString
+			status = result.status
 		}
-		log.Printf("| %-20s: %s", resultString, testRun.testID)
+		log.Printf("| %-20s: %s", status, testRun.testID)
 	}
 	log.Println("|===================================================================================================")
 	return exitCode
