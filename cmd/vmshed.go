@@ -71,7 +71,7 @@ type testSuiteRun struct {
 	vmSpec            *vmSpecification
 	testSpec          *testSpecification
 	overrides         []string
-	jenkins           *Jenkins
+	outDir            string
 	testRuns          []testRun
 	startVM           int
 	nrVMs             int
@@ -81,11 +81,11 @@ type testSuiteRun struct {
 }
 
 type testConfig struct {
-	jenkins  *Jenkins
-	vmSpec   *vmSpecification
-	testName string
-	test     test
-	repeats  int
+	testLogDir string
+	vmSpec     *vmSpecification
+	testName   string
+	test       test
+	repeats    int
 }
 
 // Execute runs vmshed
@@ -113,7 +113,7 @@ func rootCommand() *cobra.Command {
 	var nrVMs int
 	var failTest bool
 	var quiet bool
-	var jenkinsWS string
+	var outDir string
 	var version bool
 	var variantsToRun []string
 	var errorDetails bool
@@ -121,7 +121,13 @@ func rootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "vmshed",
 		Short: "Run tests in VMs",
-		Long:  `Run tests in VMs`,
+		Long: `Run tests in VMs.
+
+Logs and results in XML and JSON formats are written to an
+output directory. It must be possible for libvirt to write to
+files in this directory. NFS mounts generally cannot be used
+due to root_squash. Nonetheless, the files will be owned by the
+current user.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if version {
 				fmt.Println(prog, config.Version)
@@ -142,6 +148,11 @@ func rootCommand() *cobra.Command {
 			log.Printf("Using random seed: %d", randomSeed)
 			rand.Seed(randomSeed)
 
+			err := os.MkdirAll(outDir, 0755)
+			if err != nil {
+				log.Fatalf("could not mkdir %s: %v", outDir, err)
+			}
+
 			var vmSpec vmSpecification
 			if _, err := toml.DecodeFile(vmSpecPath, &vmSpec); err != nil {
 				log.Fatal(err)
@@ -160,7 +171,7 @@ func rootCommand() *cobra.Command {
 			testSpec.TestSuiteFile = joinIfRel(filepath.Dir(testSpecPath), testSpec.TestSuiteFile)
 			testSpec.TestTimeout = durationDefault(testSpec.TestTimeout, 5*time.Minute)
 
-			suiteRun, err := createTestSuiteRun(vmSpec, testSpec, baseImages, toRun, jenkinsWS, repeats, variantsToRun)
+			suiteRun, err := createTestSuiteRun(vmSpec, testSpec, baseImages, toRun, outDir, repeats, variantsToRun)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -182,11 +193,8 @@ func rootCommand() *cobra.Command {
 				unwrapStderr(err)
 			}
 
-			if suiteRun.jenkins != nil {
-				err := saveResultsJSON(suiteRun.jenkins, suiteRun, results)
-				if err != nil {
-					log.Warnf("Failed to save JSON results: %v", err)
-				}
+			if err := saveResultsJSON(suiteRun, results); err != nil {
+				log.Warnf("Failed to save JSON results: %v", err)
 			}
 
 			exitCode := printSummaryTable(suiteRun, results)
@@ -206,7 +214,7 @@ func rootCommand() *cobra.Command {
 	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm")
 	rootCmd.Flags().BoolVarP(&failTest, "failtest", "", false, "Stop executing tests when the first one failed")
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "", false, "Don't print progess messages while tests are running")
-	rootCmd.Flags().StringVarP(&jenkinsWS, "jenkins", "", "", "If this is set to a path for the current job, text output is saved to files, logs get copied,...")
+	rootCmd.Flags().StringVarP(&outDir, "out-dir", "", "tests-out", "Directory for test results and logs")
 	rootCmd.Flags().BoolVarP(&version, "version", "", false, "Print version and exit")
 	rootCmd.Flags().Int64VarP(&randomSeed, "seed", "", 0, "The random number generator seed to use. Specifying 0 seeds with the current time (the default)")
 	rootCmd.Flags().StringSliceVarP(&variantsToRun, "variant", "", []string{}, "which variant to run (defaults to all)")
@@ -220,14 +228,9 @@ func createTestSuiteRun(
 	testSpec testSpecification,
 	baseImages []string,
 	toRun string,
-	jenkinsWS string,
+	outDir string,
 	repeats int,
 	variantsToRun []string) (testSuiteRun, error) {
-
-	jenkins, err := NewJenkins(jenkinsWS)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	for testName := range testSpec.Tests {
 		if toRun != "all" && toRun != "" { //filter tests to Run
@@ -239,7 +242,8 @@ func createTestSuiteRun(
 
 	testSpec.Variants = filterVariants(testSpec.Variants, variantsToRun)
 
-	testRuns, err := determineAllTestRuns(jenkins, &vmSpec, &testSpec, repeats)
+	testLogDir := filepath.Join(outDir, "log")
+	testRuns, err := determineAllTestRuns(testLogDir, &vmSpec, &testSpec, repeats)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -257,7 +261,7 @@ func createTestSuiteRun(
 	suiteRun := testSuiteRun{
 		vmSpec:   &vmSpec,
 		testSpec: &testSpec,
-		jenkins:  jenkins,
+		outDir:   outDir,
 		testRuns: testRuns,
 	}
 
@@ -310,7 +314,7 @@ func filterVariants(variants []variant, variantsToRun []string) []variant {
 }
 
 func determineAllTestRuns(
-	jenkins *Jenkins,
+	testLogDir string,
 	vmSpec *vmSpecification,
 	testSpec *testSpecification,
 	repeats int) ([]testRun, error) {
@@ -318,11 +322,11 @@ func determineAllTestRuns(
 	testRuns := []testRun{}
 	for testName, test := range testSpec.Tests {
 		config := testConfig{
-			jenkins:  jenkins,
-			vmSpec:   vmSpec,
-			testName: testName,
-			test:     test,
-			repeats:  repeats,
+			testLogDir: testLogDir,
+			vmSpec:     vmSpec,
+			testName:   testName,
+			test:       test,
+			repeats:    repeats,
 		}
 		runs, err := determineRunsForTest(&config, testSpec.Variants)
 		if err != nil {
@@ -432,15 +436,14 @@ func randomVMWithTags(config *testConfig) (vm, error) {
 }
 
 func newTestRun(config *testConfig, variant variant, vms []vm, testIndex int) testRun {
+	testID := testIDString(config.testName, len(vms), variant.Name, testIndex)
+
 	run := testRun{
 		testName: config.testName,
-		testID:   testIDString(config.testName, len(vms), variant.Name, testIndex),
+		testID:   testID,
+		outDir:   filepath.Join(config.testLogDir, testID),
 		vms:      vms,
 		variant:  variant,
-	}
-
-	if config.jenkins.IsActive() {
-		run.outDir = config.jenkins.SubDir(filepath.Join("log", run.testID))
 	}
 
 	return run

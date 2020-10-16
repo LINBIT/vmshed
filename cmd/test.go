@@ -137,22 +137,15 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	}
 
 	testLog := testRes.testLog.Bytes()
-	if suiteRun.jenkins.IsActive() {
-		if err := ioutil.WriteFile(filepath.Join(run.outDir, "test.log"), testLog, 0644); err != nil {
-			fmt.Fprintf(&report, "| FAILED to write log; suppressing original error: %v\n", testErr)
-			testErr = err
-		}
+	if err := ioutil.WriteFile(filepath.Join(run.outDir, "test.log"), testLog, 0644); err != nil {
+		fmt.Fprintf(&report, "| FAILED to write log; suppressing original error: %v\n", testErr)
+		testErr = err
+	}
 
-		if err := suiteRun.jenkins.XMLLog("test-results", run.testID, testRes, testLog); err != nil {
-			fmt.Fprintf(&report, "| FAILED to write XML log; suppressing original error: %v\n", testErr)
-			testErr = err
-		}
-	} else {
-		fmt.Fprintf(&report, "| Test log for %s:\n", run.testID)
-		testLogLines := strings.Split(strings.TrimSpace(string(testLog)), "\n")
-		for _, line := range testLogLines {
-			fmt.Fprintln(&report, "|", line)
-		}
+	resultsDir := filepath.Join(suiteRun.outDir, "test-results")
+	if err := XMLLog(resultsDir, run.testID, testRes, testLog); err != nil {
+		fmt.Fprintf(&report, "| FAILED to write XML log; suppressing original error: %v\n", testErr)
+		testErr = err
 	}
 	fmt.Fprintln(&report, "|===================================================================================================")
 
@@ -212,16 +205,14 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, testnod
 	res.timeout = testCtx.Err() != nil
 
 	// copy artifacts from VMs
-	if suiteRun.jenkins.IsActive() {
-		for _, vm := range testnodes {
-			for _, directory := range suiteRun.testSpec.Artifacts {
-				// tgtPath will be /outdir/logs/{testname}/{vmname}/copy/path
-				tgtPath := filepath.Join(run.outDir, vm.vmName(), filepath.Dir(directory))
-				os.MkdirAll(tgtPath, 0755)
-				if err := copyDir(logger, vm, directory, tgtPath); err != nil {
-					logger.Printf("ARTIFACTCOPY: FAILED copy artifact directory %s: %s", directory, err.Error())
-					dumpStderr(logger, err)
-				}
+	for _, vm := range testnodes {
+		for _, directory := range suiteRun.testSpec.Artifacts {
+			// tgtPath will be /outdir/logs/{testname}/{vmname}/copy/path
+			tgtPath := filepath.Join(run.outDir, vm.vmName(), filepath.Dir(directory))
+			os.MkdirAll(tgtPath, 0755)
+			if err := copyDir(logger, vm, directory, tgtPath); err != nil {
+				logger.Printf("ARTIFACTCOPY: FAILED copy artifact directory %s: %s", directory, err.Error())
+				dumpStderr(logger, err)
 			}
 		}
 	}

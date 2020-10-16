@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 )
 
-func saveResultsJSON(jenkins *Jenkins, suiteRun testSuiteRun, results map[string]testResult) error {
+func saveResultsJSON(suiteRun testSuiteRun, results map[string]testResult) error {
 	type resultData struct {
 		ID         string    `json:"id"`
 		Time       time.Time `json:"time"`
@@ -25,7 +26,7 @@ func saveResultsJSON(jenkins *Jenkins, suiteRun testSuiteRun, results map[string
 	// record all results from the test suite run with the same timestamp
 	time := time.Now()
 
-	filename := jenkins.SubDir("results.json")
+	filename := filepath.Join(suiteRun.outDir, "results.json")
 	log.Printf("Saving results as JSON to %s", filename)
 	dest, err := os.Create(filename)
 	if err != nil {

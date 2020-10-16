@@ -41,8 +41,8 @@ func testIDString(test string, vmCount int, variantName string, testIndex int) s
 	return fmt.Sprintf("%s-%d-%s-%d", test, vmCount, variantName, testIndex)
 }
 
-func provisionImage(ctx context.Context, vmSpec *vmSpecification, overrides []string, nr int, v *vm, jenkins *Jenkins) error {
-	newImageName := vmSpec.ImageName(v)
+func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm) error {
+	newImageName := suiteRun.vmSpec.ImageName(v)
 	logger := log.WithFields(log.Fields{
 		"Action":    "Provision",
 		"ImageName": newImageName,
@@ -58,21 +58,18 @@ func provisionImage(ctx context.Context, vmSpec *vmSpecification, overrides []st
 		return err
 	}
 
-	outDir := ""
-	if jenkins.IsActive() {
-		outDir = jenkins.SubDir("provision-log")
-		if err := os.MkdirAll(outDir, 0755); err != nil {
-			return err
-		}
+	outDir := filepath.Join(suiteRun.outDir, "provision-log")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return err
 	}
 
 	argv = []string{"virter", "image", "build",
 		"--id", strconv.Itoa(nr),
-		"--provision", vmSpec.ProvisionFile}
+		"--provision", suiteRun.vmSpec.ProvisionFile}
 	if outDir != "" {
 		argv = append(argv, "--console", outDir)
 	}
-	for _, override := range overrides {
+	for _, override := range suiteRun.overrides {
 		argv = append(argv, "--set", override)
 	}
 	for key, value := range v.Values {
@@ -85,7 +82,7 @@ func provisionImage(ctx context.Context, vmSpec *vmSpecification, overrides []st
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	provisionCtx, cancel := context.WithTimeout(ctx, time.Duration(vmSpec.ProvisionTimeout))
+	provisionCtx, cancel := context.WithTimeout(ctx, time.Duration(suiteRun.vmSpec.ProvisionTimeout))
 	defer cancel()
 
 	log.Printf("EXECUTING: %s", argv)
