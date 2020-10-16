@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -56,11 +58,19 @@ func provisionImage(ctx context.Context, vmSpec *vmSpecification, overrides []st
 		return err
 	}
 
+	outDir := ""
+	if jenkins.IsActive() {
+		outDir = jenkins.SubDir("provision-log")
+		if err := os.MkdirAll(outDir, 0755); err != nil {
+			return err
+		}
+	}
+
 	argv = []string{"virter", "image", "build",
 		"--id", strconv.Itoa(nr),
 		"--provision", vmSpec.ProvisionFile}
-	if jenkins.IsActive() {
-		argv = append(argv, "--console", jenkins.SubDir("provision-log"))
+	if outDir != "" {
+		argv = append(argv, "--console", outDir)
 	}
 	for _, override := range overrides {
 		argv = append(argv, "--set", override)
@@ -72,14 +82,27 @@ func provisionImage(ctx context.Context, vmSpec *vmSpecification, overrides []st
 
 	cmd = exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	provisionCtx, cancel := context.WithTimeout(ctx, time.Duration(vmSpec.ProvisionTimeout))
 	defer cancel()
 
 	log.Printf("EXECUTING: %s", argv)
 	start := time.Now()
-	err := cmdStderrTerm(provisionCtx, logger, cmd)
+	err := cmdRunTerm(provisionCtx, logger, cmd)
 	log.Printf("EXECUTIONTIME: Provisioning image %s: %v", newImageName, time.Since(start))
+
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr.Stderr = stderr.Bytes()
+	}
+
+	if outDir != "" {
+		outPath := filepath.Join(outDir, fmt.Sprintf("%s-provision.log", newImageName))
+		if logWriteErr := ioutil.WriteFile(outPath, stderr.Bytes(), 0644); logWriteErr != nil {
+			return logWriteErr
+		}
+	}
 
 	if ctx.Err() != nil {
 		return fmt.Errorf("canceled")
