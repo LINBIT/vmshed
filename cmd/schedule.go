@@ -60,7 +60,9 @@ func runScheduler(ctx context.Context, suiteRun *testSuiteRun) map[string]testRe
 		log.Warnln("ERROR: Printing all errors")
 		for i, err := range state.errors {
 			log.Warnf("ERROR %d: %s", i, err)
-			unwrapStderr(err)
+			if suiteRun.printErrorDetails {
+				unwrapStderr(err)
+			}
 		}
 	}
 	return state.runResults

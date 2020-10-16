@@ -68,15 +68,16 @@ type variant struct {
 }
 
 type testSuiteRun struct {
-	vmSpec    *vmSpecification
-	testSpec  *testSpecification
-	overrides []string
-	jenkins   *Jenkins
-	testRuns  []testRun
-	startVM   int
-	nrVMs     int
-	failTest  bool
-	quiet     bool
+	vmSpec            *vmSpecification
+	testSpec          *testSpecification
+	overrides         []string
+	jenkins           *Jenkins
+	testRuns          []testRun
+	startVM           int
+	nrVMs             int
+	failTest          bool
+	quiet             bool
+	printErrorDetails bool
 }
 
 type testConfig struct {
@@ -115,6 +116,7 @@ func rootCommand() *cobra.Command {
 	var jenkinsWS string
 	var version bool
 	var variantsToRun []string
+	var errorDetails bool
 
 	rootCmd := &cobra.Command{
 		Use:   "vmshed",
@@ -168,6 +170,7 @@ func rootCommand() *cobra.Command {
 			suiteRun.nrVMs = nrVMs
 			suiteRun.failTest = failTest
 			suiteRun.quiet = quiet
+			suiteRun.printErrorDetails = errorDetails
 
 			ctx, cancel := signalcontext.On(unix.SIGINT, unix.SIGTERM)
 			defer cancel()
@@ -207,6 +210,7 @@ func rootCommand() *cobra.Command {
 	rootCmd.Flags().BoolVarP(&version, "version", "", false, "Print version and exit")
 	rootCmd.Flags().Int64VarP(&randomSeed, "seed", "", 0, "The random number generator seed to use. Specifying 0 seeds with the current time (the default)")
 	rootCmd.Flags().StringSliceVarP(&variantsToRun, "variant", "", []string{}, "which variant to run (defaults to all)")
+	rootCmd.Flags().BoolVarP(&errorDetails, "error-details", "", true, "Show all test error logs at the end of the run")
 
 	return rootCmd
 }
