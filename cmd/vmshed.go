@@ -488,7 +488,7 @@ func addNetworkHosts(ctx context.Context, suiteRun *testSuiteRun) error {
 func removeNetworkHosts(suiteRun *testSuiteRun) {
 	log.Println("STAGE: Remove network host mappings")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Duration(suiteRun.nrVMs)*time.Second)
 	defer cancel()
 
 	argv := []string{
