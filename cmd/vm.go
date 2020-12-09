@@ -209,7 +209,7 @@ func shutdownVMs(logger *log.Logger, testnodes ...vmInstance) error {
 }
 
 func virterEnv() []string {
-	return append(os.Environ(), "LIBVIRT_STATIC_DHCP=true")
+	return append(os.Environ(), "VIRTER_LIBVIRT_STATIC_DHCP=true")
 }
 
 // cmdStderrTerm runs a Cmd, collecting stderr and terminating gracefully
