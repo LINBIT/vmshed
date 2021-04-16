@@ -15,3 +15,12 @@ tags = ["podman"]
 [tests.example_test_b]
 vms = [2]
 tags = ["podman"]
+
+[tests.extra_networks]
+vms = [2]
+tags = ["podman"]
+[[tests.extra_networks.networks]]
+name = "second-net"
+forward = "nat"
+dhcp = true
+domain = "second-net"

@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -67,6 +66,13 @@ type variant struct {
 	Variables map[string]string `toml:"variables"`
 }
 
+type virterNet struct {
+	Name        string `toml:"name"`
+	ForwardMode string `toml:"forward"`
+	DHCP        bool   `toml:"dhcp"`
+	Domain      string `toml:"domain"`
+}
+
 type testSuiteRun struct {
 	vmSpec            *vmSpecification
 	testSpec          *testSpecification
@@ -75,6 +81,7 @@ type testSuiteRun struct {
 	testRuns          []testRun
 	startVM           int
 	nrVMs             int
+	firstNet          *net.IPNet
 	failTest          bool
 	quiet             bool
 	printErrorDetails bool
@@ -117,6 +124,7 @@ func rootCommand() *cobra.Command {
 	var version bool
 	var variantsToRun []string
 	var errorDetails bool
+	var firstSubnet string
 
 	rootCmd := &cobra.Command{
 		Use:   "vmshed",
@@ -176,18 +184,24 @@ current user.`,
 				log.Fatal(err)
 			}
 
+			_, firstNet, err := net.ParseCIDR(firstSubnet)
+			if err != nil {
+				log.Fatal(err)
+			}
+
 			suiteRun.overrides = provisionOverrides
 			suiteRun.startVM = startVM
 			suiteRun.nrVMs = nrVMs
 			suiteRun.failTest = failTest
 			suiteRun.quiet = quiet
 			suiteRun.printErrorDetails = errorDetails
+			suiteRun.firstNet = firstNet
 
 			ctx, cancel := signalcontext.On(unix.SIGINT, unix.SIGTERM)
 			defer cancel()
 			start := time.Now()
 
-			results, err := provisionAndExec(ctx, filepath.Base(os.Args[0]), &suiteRun)
+			results, err := provisionAndExec(ctx, &suiteRun)
 			if err != nil {
 				log.Errorf("ERROR: %v", err)
 				unwrapStderr(err)
@@ -219,6 +233,7 @@ current user.`,
 	rootCmd.Flags().Int64VarP(&randomSeed, "seed", "", 0, "The random number generator seed to use. Specifying 0 seeds with the current time (the default)")
 	rootCmd.Flags().StringSliceVarP(&variantsToRun, "variant", "", []string{}, "which variant to run (defaults to all)")
 	rootCmd.Flags().BoolVarP(&errorDetails, "error-details", "", true, "Show all test error logs at the end of the run")
+	rootCmd.Flags().StringVarP(&firstSubnet, "first-subnet", "", "10.224.0.0/24", "The first subnet to use for VMs. If more virtual networks are required, the next higher /24 networks will be used")
 
 	return rootCmd
 }
@@ -443,69 +458,25 @@ func newTestRun(config *testConfig, variant variant, vms []vm, testIndex int) te
 		testID:   testID,
 		outDir:   filepath.Join(config.testLogDir, testID),
 		vms:      vms,
+		networks: config.test.Networks,
 		variant:  variant,
 	}
 
 	return run
 }
 
-func provisionAndExec(ctx context.Context, cmdName string, suiteRun *testSuiteRun) (map[string]testResult, error) {
+func provisionAndExec(ctx context.Context, suiteRun *testSuiteRun) (map[string]testResult, error) {
 	// Note: When virter first starts it generates a key pair. However,
 	// when we start multiple instances concurrently, they race. The result
 	// is that the VMs start successfully, but then the test can only
 	// connect to one of them. Each VM has been provided a different key,
 	// but the test only has the key that was written last. Hence the first
 	// virter command run should not be parallel.
-	err := addNetworkHosts(ctx, suiteRun)
-	if err != nil {
-		return nil, err
-	}
-
-	defer removeNetworkHosts(suiteRun)
-
 	defer removeImages(suiteRun.vmSpec)
 
 	log.Println("STAGE: Scheduler")
 	results := runScheduler(ctx, suiteRun)
 	return results, nil
-}
-
-func addNetworkHosts(ctx context.Context, suiteRun *testSuiteRun) error {
-	log.Println("STAGE: Add network host mappings")
-	argv := []string{
-		"virter", "network", "host", "add",
-		"--id", strconv.Itoa(suiteRun.startVM),
-		"--count", strconv.Itoa(suiteRun.nrVMs)}
-	log.Printf("EXECUTING: %s", argv)
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = virterEnv()
-	if err := cmdStderrTerm(ctx, log.StandardLogger(), cmd); err != nil {
-		return fmt.Errorf("cannot add network host mappings: %w", err)
-	}
-	return nil
-}
-
-func removeNetworkHosts(suiteRun *testSuiteRun) {
-	log.Println("STAGE: Remove network host mappings")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Duration(suiteRun.nrVMs)*time.Second)
-	defer cancel()
-
-	argv := []string{
-		"virter", "network", "host", "rm",
-		"--id", strconv.Itoa(suiteRun.startVM),
-		"--count", strconv.Itoa(suiteRun.nrVMs)}
-	log.Printf("EXECUTING: %s", argv)
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = virterEnv()
-	if err := cmdStderrTerm(ctx, log.StandardLogger(), cmd); err != nil {
-		log.Errorf("CLEANUP: cannot remove network host mappings: %v", err)
-		dumpStderr(log.StandardLogger(), err)
-	}
-}
-
-func ctxCancled(ctx context.Context) bool {
-	return ctx.Err() != nil
 }
 
 func joinIfRel(basepath string, path string) string {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"net"
 	"reflect"
 	"testing"
 )
@@ -12,6 +13,11 @@ import (
 func TestChooseNextAction(t *testing.T) {
 	vm0 := vm{BaseImage: "b0"}
 	vm1 := vm{BaseImage: "b1"}
+
+	_, baseNet, err := net.ParseCIDR("10.224.0.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	testRun1VM := testRun{
 		testID: "t1VM",
@@ -40,6 +46,7 @@ func TestChooseNextAction(t *testing.T) {
 				testRuns: []testRun{testRun1VM, testRun2VM},
 				startVM:  5,
 				nrVMs:    2,
+				firstNet: baseNet,
 			},
 			sequence: []step{
 				{
@@ -59,6 +66,7 @@ func TestChooseNextAction(t *testing.T) {
 				startVM:  5,
 				nrVMs:    2,
 				failTest: true,
+				firstNet: baseNet,
 			},
 			sequence: []step{
 				{
@@ -77,6 +85,7 @@ func TestChooseNextAction(t *testing.T) {
 				testRuns: []testRun{testRun1VM, testRun2VM},
 				startVM:  5,
 				nrVMs:    2,
+				firstNet: baseNet,
 			},
 			sequence: []step{
 				{
@@ -106,6 +115,7 @@ func TestChooseNextAction(t *testing.T) {
 				testRuns: []testRun{testRun1VM, testRun2VM},
 				startVM:  5,
 				nrVMs:    2,
+				firstNet: baseNet,
 			},
 			sequence: []step{
 				{

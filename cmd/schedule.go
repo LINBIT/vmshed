@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os/exec"
 
 	log "github.com/sirupsen/logrus"
@@ -31,6 +32,7 @@ type suiteState struct {
 	runStage   map[string]runStage
 	runResults map[string]testResult
 	freeIDs    map[int]bool
+	freeNets   *networkList
 	errors     []error
 }
 
@@ -69,11 +71,14 @@ func runScheduler(ctx context.Context, suiteRun *testSuiteRun) map[string]testRe
 }
 
 func initializeState(suiteRun *testSuiteRun) *suiteState {
+	netlist := NewNetworkList(suiteRun.firstNet)
+
 	state := suiteState{
 		imageStage: make(map[string]imageStage),
 		runStage:   make(map[string]runStage),
 		runResults: make(map[string]testResult),
 		freeIDs:    make(map[int]bool),
+		freeNets:   netlist,
 	}
 	for _, run := range suiteRun.testRuns {
 		state.runStage[run.testID] = runNew
@@ -197,7 +202,8 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 	for i, v := range suiteRun.vmSpec.VMs {
 		if state.imageStage[v.BaseImage] == imageNone {
 			ids := getIDs(suiteRun, state, 1)
-			return &provisionImageAction{v: &suiteRun.vmSpec.VMs[i], id: ids[0]}
+			provisionNet := state.freeNets.ReserveNext()
+			return &provisionImageAction{v: &suiteRun.vmSpec.VMs[i], id: ids[0], provisionNet: provisionNet}
 		}
 	}
 
@@ -235,7 +241,8 @@ func nextActionRun(suiteRun *testSuiteRun, state *suiteState, run *testRun) acti
 	}
 
 	ids := getIDs(suiteRun, state, len(run.vms))
-	return &performTestAction{run: run, ids: ids}
+	nets := getNets(state, run.networks)
+	return &performTestAction{run: run, ids: ids, nets: nets}
 }
 
 func getIDs(suiteRun *testSuiteRun, state *suiteState, n int) []int {
@@ -252,6 +259,18 @@ func getIDs(suiteRun *testSuiteRun, state *suiteState, n int) []int {
 	return ids
 }
 
+func getNets(state *suiteState, nets []virterNet) []*net.IPNet {
+	freeNets := []*net.IPNet{state.freeNets.ReserveNext()}
+
+	for i := range nets {
+		if nets[i].DHCP {
+			freeNets = append(freeNets, state.freeNets.ReserveNext())
+		}
+	}
+
+	return freeNets
+}
+
 func deleteAll(m map[int]bool, ints []int) {
 	for _, index := range ints {
 		delete(m, index)
@@ -261,6 +280,7 @@ func deleteAll(m map[int]bool, ints []int) {
 type performTestAction struct {
 	run    *testRun
 	ids    []int
+	nets   []*net.IPNet
 	report string
 	res    testResult
 }
@@ -275,7 +295,7 @@ func (a *performTestAction) updatePre(state *suiteState) {
 }
 
 func (a *performTestAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
-	a.report, a.res = performTest(ctx, suiteRun, a.run, a.ids)
+	a.report, a.res = performTest(ctx, suiteRun, a.run, a.ids, a.nets)
 }
 
 func (a *performTestAction) updatePost(state *suiteState) {
@@ -289,12 +309,16 @@ func (a *performTestAction) updatePost(state *suiteState) {
 	for _, id := range a.ids {
 		state.freeIDs[id] = true
 	}
+	for _, n := range a.nets {
+		state.freeNets.Free(n)
+	}
 }
 
 type provisionImageAction struct {
-	v   *vm
-	id  int
-	err error
+	v            *vm
+	id           int
+	provisionNet *net.IPNet
+	err          error
 }
 
 func (a *provisionImageAction) name() string {
@@ -307,11 +331,12 @@ func (a *provisionImageAction) updatePre(state *suiteState) {
 }
 
 func (a *provisionImageAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
-	a.err = provisionImage(ctx, suiteRun, a.id, a.v)
+	a.err = provisionImage(ctx, suiteRun, a.id, a.v, a.provisionNet)
 }
 
 func (a *provisionImageAction) updatePost(state *suiteState) {
 	state.freeIDs[a.id] = true
+	state.freeNets.Free(a.provisionNet)
 	if a.err == nil {
 		state.imageStage[a.v.BaseImage] = imageReady
 	} else {
