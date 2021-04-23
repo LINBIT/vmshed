@@ -22,6 +22,7 @@ type vm struct {
 	Values    map[string]string `toml:"values"`
 	Memory    string            `toml:"memory"`
 	VCPUs     uint              `toml:"vcpus"`
+	BootCap   string            `toml:"boot_capacity"`
 	Disks     []string          `toml:"disks"`
 	Tags      []string          `toml:"tags"`
 }
@@ -31,6 +32,7 @@ type vmInstance struct {
 	nr        int
 	memory    string
 	vcpus     uint
+	bootCap   string
 	disks     []string
 	extraNics []string
 }
@@ -84,6 +86,9 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	}
 	for key, value := range v.Values {
 		argv = append(argv, "--set", "values."+key+"="+value)
+	}
+	if suiteRun.vmSpec.ProvisionBootCap != "" {
+		argv = append(argv, "--bootcap", suiteRun.vmSpec.ProvisionBootCap)
 	}
 	argv = append(argv, v.BaseImage, newImageName)
 
@@ -183,7 +188,9 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 		"--id", strconv.Itoa(vm.nr),
 		"--console", run.outDir,
 		"--memory", vm.memory,
-		"--vcpus", strconv.Itoa(int(vm.vcpus))}
+		"--vcpus", strconv.Itoa(int(vm.vcpus)),
+		"--bootcapacity", vm.bootCap,
+	}
 
 	for _, disks := range vm.disks {
 		argv = append(argv, "--disk", disks)

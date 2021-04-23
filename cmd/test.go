@@ -90,6 +90,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	for i, v := range run.vms {
 		var memory string
 		var vcpus uint
+		var bootCap string
 		var disks []string
 		if v.Memory != "" {
 			memory = v.Memory
@@ -100,6 +101,11 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 			vcpus = v.VCPUs
 		} else {
 			vcpus = 4
+		}
+		if v.BootCap != "" {
+			bootCap = v.BootCap
+		} else {
+			bootCap = "10G"
 		}
 		if len(v.Disks) > 0 {
 			disks = v.Disks
@@ -115,6 +121,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 			nr:        ids[i],
 			memory:    memory,
 			vcpus:     vcpus,
+			bootCap:   bootCap,
 			disks:     disks,
 			extraNics: networks,
 		}
