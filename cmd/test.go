@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/apparentlymart/go-cidr/cidr"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -34,10 +31,6 @@ type testRun struct {
 	vms      []vm
 	networks []virterNet
 	variant  variant
-}
-
-func (t *testRun) WithTestID(name string) string {
-	return fmt.Sprintf("%s-%s", t.testID, name)
 }
 
 type TestStatus string
@@ -78,7 +71,7 @@ func (r testResult) String() string {
 	return string(r.status)
 }
 
-func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids []int, availableNets []*net.IPNet) (string, testResult) {
+func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids []int, networkNames []string) (string, testResult) {
 	if run.outDir != "" {
 		err := os.MkdirAll(run.outDir, 0755)
 		if err != nil {
@@ -112,23 +105,19 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 		} else {
 			disks = []string{"name=data,size=2G,bus=scsi"}
 		}
-		networks := make([]string, len(run.networks))
-		for i := range run.networks {
-			networks[i] = run.networks[i].Name
-		}
 		instance := vmInstance{
-			ImageName: suiteRun.vmSpec.ImageName(&v),
-			nr:        ids[i],
-			memory:    memory,
-			vcpus:     vcpus,
-			bootCap:   bootCap,
-			disks:     disks,
-			extraNics: networks,
+			ImageName:    suiteRun.vmSpec.ImageName(&v),
+			nr:           ids[i],
+			memory:       memory,
+			vcpus:        vcpus,
+			bootCap:      bootCap,
+			disks:        disks,
+			networkNames: networkNames,
 		}
 		vms = append(vms, instance)
 	}
 
-	testRes := execTest(ctx, suiteRun, run, availableNets, vms...)
+	testRes := execTest(ctx, suiteRun, run, networkNames[0], vms...)
 
 	testRes.status = StatusSuccess
 	var testErr error
@@ -173,24 +162,16 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	return report.String(), testRes
 }
 
-func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, availableNets []*net.IPNet, testnodes ...vmInstance) testResult {
+func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessNetwork string, testnodes ...vmInstance) testResult {
 	res := testResult{}
 	logger := testLogger(&res.log, suiteRun.quiet)
 
 	logger.Printf("EXECUTING: %s Nodes(%+v)", run.testID, testnodes)
 
-	// Prepare networks
-	err := prepareNetworks(ctx, logger, run.networks, availableNets, run.WithTestID)
-	defer removeNetworks(logger, run.networks, run.WithTestID)
-	if err != nil {
-		res.err = err
-		return res
-	}
-
 	// Start VMs
 	start := time.Now()
-	err = startVMs(ctx, logger, run, testnodes...)
-	defer shutdownVMs(logger, run, testnodes...)
+	err := startVMs(ctx, logger, run, testnodes...)
+	defer shutdownVMs(logger, testnodes...)
 	if err != nil {
 		res.err = err
 		return res
@@ -216,7 +197,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, availab
 	}
 
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = virterEnv(run.WithTestID)
+	cmd.Env = virterEnv(accessNetwork)
 	cmd.Stderr = &res.testLog
 
 	testCtx, cancel := context.WithTimeout(ctx, time.Duration(suiteRun.testSpec.TestTimeout))
@@ -241,7 +222,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, availab
 			// tgtPath will be /outdir/logs/{testname}/{vmname}/copy/path
 			tgtPath := filepath.Join(run.outDir, vm.vmName(), filepath.Dir(directory))
 			os.MkdirAll(tgtPath, 0755)
-			if err := copyDir(logger, run, vm, directory, tgtPath); err != nil {
+			if err := copyDir(logger, vm, directory, tgtPath); err != nil {
 				logger.Printf("ARTIFACTCOPY: FAILED copy artifact directory %s: %s", directory, err.Error())
 				dumpStderr(logger, err)
 			}
@@ -251,73 +232,14 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, availab
 	return res
 }
 
-// We need a mutex to serialize creating networks. This is because of https://gitlab.com/libvirt/libvirt/-/issues/78
-// Basically, libvirt could potentially generate the same bridge name twice, which results in unusable networks.
-var networkAddRun sync.Mutex
-
-func prepareNetworks(ctx context.Context, logger log.FieldLogger, extraNets []virterNet, availableNets []*net.IPNet, uniqueName func(string) string) error {
-	netCounter := 0
-	for _, network := range append([]virterNet{accessNetwork()}, extraNets...) {
-		argv := []string{"virter", "network", "add", uniqueName(network.Name)}
-		if network.DHCP {
-			gatewayAddress := cidr.Inc(availableNets[netCounter].IP)
-			networkCidr := net.IPNet{IP: gatewayAddress, Mask: availableNets[netCounter].Mask}
-			argv = append(argv, "--network-cidr", networkCidr.String(), "--dhcp")
-			netCounter++
-		}
-		if network.ForwardMode != "" {
-			argv = append(argv, "--forward-mode", network.ForwardMode)
-		}
-		if network.Domain != "" {
-			argv = append(argv, "--domain", network.Domain)
-		}
-		logger.Printf("EXECUTING: %s", argv)
-		networkAddRun.Lock()
-		err := cmdStderrTerm(ctx, logger, exec.Command(argv[0], argv[1:]...))
-		networkAddRun.Unlock()
-		if err != nil {
-			logger.WithError(err).Warnf("failed to create test network %s", uniqueName(network.Name))
-			return err
-		}
-	}
-	return nil
-}
-
-func removeNetworks(logger log.FieldLogger, extraNetworks []virterNet, uniqueName func(string) string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	for _, network := range append([]virterNet{accessNetwork()}, extraNetworks...) {
-		argv := []string{"virter", "network", "rm", uniqueName(network.Name)}
-		logger.Printf("EXECUTING: %s", argv)
-		err := cmdStderrTerm(ctx, logger, exec.Command(argv[0], argv[1:]...))
-		if err != nil {
-			logger.WithError(err).Warnf("failed to remove test network %s", uniqueName(network.Name))
-			return err
-		}
-	}
-	return nil
-}
-
-const testAccessNetworkName = "default"
-
-func accessNetwork() virterNet {
-	return virterNet{
-		Name:        testAccessNetworkName,
-		Domain:      "test",
-		ForwardMode: "nat",
-		DHCP:        true,
-	}
-}
-
-func copyDir(logger log.FieldLogger, run *testRun, vm vmInstance, srcDir string, hostDir string) error {
+func copyDir(logger log.FieldLogger, vm vmInstance, srcDir string, hostDir string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	args := []string{"virter", "vm", "cp", vm.vmName() + ":" + srcDir, hostDir}
 	logger.Printf("EXECUTING VIRTER COPY: %s", args)
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Env = virterEnv(run.WithTestID)
+	cmd.Env = virterEnv(vm.networkNames[0])
 	return cmdStderrTerm(ctx, logger, cmd)
 }
 

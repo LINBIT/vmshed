@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -68,7 +69,6 @@ type variant struct {
 }
 
 type virterNet struct {
-	Name        string `toml:"name"`
 	ForwardMode string `toml:"forward"`
 	DHCP        bool   `toml:"dhcp"`
 	Domain      string `toml:"domain"`
@@ -473,6 +473,13 @@ func provisionAndExec(ctx context.Context, suiteRun *testSuiteRun) (map[string]t
 	// connect to one of them. Each VM has been provided a different key,
 	// but the test only has the key that was written last. Hence the first
 	// virter command run should not be parallel.
+	log.Println("STAGE: Initialize virter")
+	argv := []string{"virter", "image", "ls", "--available"}
+	log.Printf("EXECUTING: %s", argv)
+	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
+		return map[string]testResult{}, fmt.Errorf("cannot initialize virter: %w", err)
+	}
+
 	defer removeImages(suiteRun.vmSpec)
 
 	log.Println("STAGE: Scheduler")

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,13 +27,13 @@ type vm struct {
 }
 
 type vmInstance struct {
-	ImageName string
-	nr        int
-	memory    string
-	vcpus     uint
-	bootCap   string
-	disks     []string
-	extraNics []string
+	ImageName    string
+	nr           int
+	memory       string
+	vcpus        uint
+	bootCap      string
+	disks        []string
+	networkNames []string
 }
 
 func (vm vmInstance) vmName() string {
@@ -45,7 +44,7 @@ func testIDString(test string, vmCount int, variantName string, testIndex int) s
 	return fmt.Sprintf("%s-%d-%s-%d", test, vmCount, variantName, testIndex)
 }
 
-func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, provisionNet *net.IPNet) error {
+func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, networkName string) error {
 	newImageName := suiteRun.vmSpec.ImageName(v)
 	logger := log.WithFields(log.Fields{
 		"Action":    "Provision",
@@ -58,15 +57,6 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	// this command is idempotent, so even if it does nothing, it returns zero
 	cmd := exec.Command(argv[0], argv[1:]...)
 	if err := cmdStderrTerm(ctx, logger, cmd); err != nil {
-		return err
-	}
-
-	withProvisionName := func(basename string) string {
-		return fmt.Sprintf("provision-%s-%s", newImageName, basename)
-	}
-	err := prepareNetworks(ctx, logger, nil, []*net.IPNet{provisionNet}, withProvisionName)
-	defer removeNetworks(logger, nil, withProvisionName)
-	if err != nil {
 		return err
 	}
 
@@ -93,7 +83,7 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	argv = append(argv, v.BaseImage, newImageName)
 
 	cmd = exec.Command(argv[0], argv[1:]...)
-	cmd.Env = virterEnv(withProvisionName)
+	cmd.Env = virterEnv(networkName)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -102,7 +92,7 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 
 	log.Printf("EXECUTING: %s", argv)
 	start := time.Now()
-	err = cmdRunTerm(provisionCtx, logger, cmd)
+	err := cmdRunTerm(provisionCtx, logger, cmd)
 	log.Printf("EXECUTIONTIME: Provisioning image %s: %v", newImageName, time.Since(start))
 
 	if exitErr, ok := err.(*exec.ExitError); ok {
@@ -178,7 +168,7 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 	logger.Printf("EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = virterEnv(run.WithTestID)
+	cmd.Env = virterEnv(vm.networkNames[0])
 	if err := cmdStderrTerm(ctx, logger, cmd); err != nil {
 		return err
 	}
@@ -195,18 +185,18 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 	for _, disks := range vm.disks {
 		argv = append(argv, "--disk", disks)
 	}
-	for _, nic := range vm.extraNics {
-		argv = append(argv, "--nic", fmt.Sprintf("type=network,source=%s", run.WithTestID(nic)))
+	for _, networkName := range vm.networkNames[1:] {
+		argv = append(argv, "--nic", fmt.Sprintf("type=network,source=%s", networkName))
 	}
 	argv = append(argv, "--wait-ssh", vm.ImageName)
 
 	logger.Printf("EXECUTING: %s", argv)
 	cmd = exec.Command(argv[0], argv[1:]...)
-	cmd.Env = virterEnv(run.WithTestID)
+	cmd.Env = virterEnv(vm.networkNames[0])
 	return cmdStderrTerm(ctx, logger, cmd)
 }
 
-func shutdownVMs(logger *log.Logger, run *testRun, testnodes ...vmInstance) error {
+func shutdownVMs(logger *log.Logger, testnodes ...vmInstance) error {
 	for _, vm := range testnodes {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -216,7 +206,7 @@ func shutdownVMs(logger *log.Logger, run *testRun, testnodes ...vmInstance) erro
 		argv := []string{"virter", "vm", "rm", vmName}
 		logger.Printf("EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
-		cmd.Env = virterEnv(run.WithTestID)
+		cmd.Env = virterEnv(vm.networkNames[0])
 		if err := cmdStderrTerm(ctx, logger, cmd); err != nil {
 			logger.Errorf("ERROR: Could not stop VM %s: %v", vmName, err)
 			dumpStderr(logger, err)
@@ -227,8 +217,8 @@ func shutdownVMs(logger *log.Logger, run *testRun, testnodes ...vmInstance) erro
 	return nil
 }
 
-func virterEnv(nameContext func(string) string) []string {
-	return append(os.Environ(), fmt.Sprintf("VIRTER_LIBVIRT_NETWORK=%s", nameContext(testAccessNetworkName)))
+func virterEnv(networkName string) []string {
+	return append(os.Environ(), fmt.Sprintf("VIRTER_LIBVIRT_NETWORK=%s", networkName), "VIRTER_LIBVIRT_STATIC_DHCP=true")
 }
 
 // cmdStderrTerm runs a Cmd, collecting stderr and terminating gracefully

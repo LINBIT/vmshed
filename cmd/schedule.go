@@ -10,6 +10,21 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type networkStage string
+
+const (
+	networkAdd   networkStage = "Add"
+	networkReady networkStage = "Ready"
+	networkBusy  networkStage = "Busy"
+	networkError networkStage = "Error"
+)
+
+type networkState struct {
+	network  virterNet
+	isAccess bool
+	stage    networkStage
+}
+
 type imageStage string
 
 const (
@@ -28,6 +43,7 @@ const (
 )
 
 type suiteState struct {
+	networks   map[string]*networkState
 	imageStage map[string]imageStage
 	runStage   map[string]runStage
 	runResults map[string]testResult
@@ -52,6 +68,7 @@ type action interface {
 
 func runScheduler(ctx context.Context, suiteRun *testSuiteRun) map[string]testResult {
 	state := initializeState(suiteRun)
+	defer tearDown(state)
 
 	scheduleLoop(ctx, suiteRun, state)
 
@@ -74,6 +91,7 @@ func initializeState(suiteRun *testSuiteRun) *suiteState {
 	netlist := NewNetworkList(suiteRun.firstNet)
 
 	state := suiteState{
+		networks:   make(map[string]*networkState),
 		imageStage: make(map[string]imageStage),
 		runStage:   make(map[string]runStage),
 		runResults: make(map[string]testResult),
@@ -146,9 +164,24 @@ func scheduleLoop(ctx context.Context, suiteRun *testSuiteRun, state *suiteState
 	}
 }
 
+func tearDown(state *suiteState) {
+	for networkName := range state.networks {
+		err := removeNetwork(networkName)
+		if err != nil {
+			state.errors = append(state.errors, err)
+		}
+	}
+}
+
 func runStopping(suiteRun *testSuiteRun, state *suiteState) bool {
 	if suiteRun.failTest && state.errors != nil {
 		return true
+	}
+
+	for _, netState := range state.networks {
+		if netState.stage == networkError {
+			return true
+		}
 	}
 
 	for _, v := range suiteRun.vmSpec.VMs {
@@ -177,13 +210,7 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 			continue
 		}
 
-		// Prefer runs that use more VMs because that will generally
-		// use the available IDs more efficiently
-		betterRun := bestRun == nil ||
-			len(run.vms) > len(bestRun.vms) ||
-			(len(run.vms) == len(bestRun.vms) && !allImagesReady(state, bestRun) && allImagesReady(state, &run))
-
-		if betterRun {
+		if runBetter(state, bestRun, run) {
 			bestRun = &suiteRun.testRuns[i]
 		}
 	}
@@ -201,13 +228,38 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 
 	for i, v := range suiteRun.vmSpec.VMs {
 		if state.imageStage[v.BaseImage] == imageNone {
-			ids := getIDs(suiteRun, state, 1)
-			provisionNet := state.freeNets.ReserveNext()
-			return &provisionImageAction{v: &suiteRun.vmSpec.VMs[i], id: ids[0], provisionNet: provisionNet}
+			return nextActionProvision(suiteRun, state, &suiteRun.vmSpec.VMs[i])
 		}
 	}
 
 	return nil
+}
+
+// runBetter returns whether b is better than (potentially nil) run a.
+func runBetter(state *suiteState, a *testRun, b testRun) bool {
+	if a == nil {
+		return true
+	}
+
+	// Prefer runs that use more VMs because that will generally
+	// use the available IDs more efficiently
+	if len(b.vms) < len(a.vms) {
+		return false
+	}
+
+	if len(b.vms) > len(a.vms) {
+		return true
+	}
+
+	if allImagesReady(state, a) && allNetworksReady(state, a) {
+		return false
+	}
+
+	if allImagesReady(state, &b) && allNetworksReady(state, &b) {
+		return true
+	}
+
+	return false
 }
 
 func allImagesReady(state *suiteState, run *testRun) bool {
@@ -217,6 +269,61 @@ func allImagesReady(state *suiteState, run *testRun) bool {
 		}
 	}
 	return true
+}
+
+func allNetworksReady(state *suiteState, run *testRun) bool {
+	networkName := findReadyNetwork(state, nil, accessNetwork(), true)
+	if networkName == "" {
+		return false
+	}
+
+	_, remainingNetworks := findExtraNetworks(state, run)
+	return len(remainingNetworks) == 0
+}
+
+// findExtraNetworks returns the names of the ready networks and the networks which are not yet ready
+func findExtraNetworks(state *suiteState, run *testRun) ([]string, []virterNet) {
+	networkNames := []string{}
+	remainingNetworks := []virterNet{}
+
+	usedNetworkNames := map[string]bool{}
+	for _, network := range run.networks {
+		networkName := findReadyNetwork(state, usedNetworkNames, network, false)
+
+		if networkName == "" {
+			remainingNetworks = append(remainingNetworks, network)
+		}
+
+		networkNames = append(networkNames, networkName)
+		usedNetworkNames[networkName] = true
+	}
+
+	return networkNames, remainingNetworks
+}
+
+func findReadyNetwork(state *suiteState, exclude map[string]bool, network virterNet, access bool) string {
+	for networkName, ns := range state.networks {
+		if ns.stage != networkReady {
+			continue
+		}
+
+		if exclude[networkName] {
+			continue
+		}
+
+		if ns.network.ForwardMode != network.ForwardMode ||
+			ns.network.DHCP != network.DHCP ||
+			ns.network.Domain != network.Domain {
+			continue
+		}
+
+		if ns.isAccess != access {
+			continue
+		}
+
+		return networkName
+	}
+	return ""
 }
 
 func countNonTestIDs(suiteRun *testSuiteRun, state *suiteState) int {
@@ -240,9 +347,23 @@ func nextActionRun(suiteRun *testSuiteRun, state *suiteState, run *testRun) acti
 		return nil
 	}
 
+	network := accessNetwork()
+	networkName := findReadyNetwork(state, nil, network, true)
+	if networkName == "" {
+		return makeAddNetworkAction(state, network, true)
+	}
+
+	networkNames, remainingNetworks := findExtraNetworks(state, run)
+	if len(remainingNetworks) > 0 {
+		return makeAddNetworkAction(state, remainingNetworks[0], false)
+	}
+
 	ids := getIDs(suiteRun, state, len(run.vms))
-	nets := getNets(state, run.networks)
-	return &performTestAction{run: run, ids: ids, nets: nets}
+	return &performTestAction{
+		run:          run,
+		ids:          ids,
+		networkNames: append([]string{networkName}, networkNames...),
+	}
 }
 
 func getIDs(suiteRun *testSuiteRun, state *suiteState, n int) []int {
@@ -259,16 +380,36 @@ func getIDs(suiteRun *testSuiteRun, state *suiteState, n int) []int {
 	return ids
 }
 
-func getNets(state *suiteState, nets []virterNet) []*net.IPNet {
-	freeNets := []*net.IPNet{state.freeNets.ReserveNext()}
+func nextActionProvision(suiteRun *testSuiteRun, state *suiteState, v *vm) action {
+	network := accessNetwork()
+	networkName := findReadyNetwork(state, nil, network, true)
+	if networkName == "" {
+		return makeAddNetworkAction(state, network, true)
+	}
 
-	for i := range nets {
-		if nets[i].DHCP {
-			freeNets = append(freeNets, state.freeNets.ReserveNext())
+	ids := getIDs(suiteRun, state, 1)
+	return &provisionImageAction{v: v, id: ids[0], networkName: networkName}
+}
+
+func makeAddNetworkAction(state *suiteState, network virterNet, access bool) action {
+	// Due to https://gitlab.com/libvirt/libvirt/-/issues/78 only one addNetworkAction should run at a time.
+	// Basically, libvirt could potentially generate the same bridge name twice, which results in unusable networks.
+	for _, ns := range state.networks {
+		if ns.stage == networkAdd {
+			return nil
 		}
 	}
 
-	return freeNets
+	networkType := "extra"
+	if access {
+		networkType = "access"
+	}
+
+	return &addNetworkAction{
+		networkName: fmt.Sprintf("vmshed-%d-%s", len(state.networks), networkType),
+		network:     network,
+		access:      access,
+	}
 }
 
 func deleteAll(m map[int]bool, ints []int) {
@@ -278,11 +419,11 @@ func deleteAll(m map[int]bool, ints []int) {
 }
 
 type performTestAction struct {
-	run    *testRun
-	ids    []int
-	nets   []*net.IPNet
-	report string
-	res    testResult
+	run          *testRun
+	ids          []int
+	networkNames []string
+	report       string
+	res          testResult
 }
 
 func (a *performTestAction) name() string {
@@ -292,10 +433,13 @@ func (a *performTestAction) name() string {
 func (a *performTestAction) updatePre(state *suiteState) {
 	state.runStage[a.run.testID] = runExec
 	deleteAll(state.freeIDs, a.ids)
+	for _, networkName := range a.networkNames {
+		state.networks[networkName].stage = networkBusy
+	}
 }
 
 func (a *performTestAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
-	a.report, a.res = performTest(ctx, suiteRun, a.run, a.ids, a.nets)
+	a.report, a.res = performTest(ctx, suiteRun, a.run, a.ids, a.networkNames)
 }
 
 func (a *performTestAction) updatePost(state *suiteState) {
@@ -306,19 +450,19 @@ func (a *performTestAction) updatePost(state *suiteState) {
 		state.errors = append(state.errors,
 			fmt.Errorf("%s: %w", a.run.testID, a.res.err))
 	}
+	for _, networkName := range a.networkNames {
+		state.networks[networkName].stage = networkReady
+	}
 	for _, id := range a.ids {
 		state.freeIDs[id] = true
-	}
-	for _, n := range a.nets {
-		state.freeNets.Free(n)
 	}
 }
 
 type provisionImageAction struct {
-	v            *vm
-	id           int
-	provisionNet *net.IPNet
-	err          error
+	v           *vm
+	id          int
+	networkName string
+	err         error
 }
 
 func (a *provisionImageAction) name() string {
@@ -328,15 +472,16 @@ func (a *provisionImageAction) name() string {
 func (a *provisionImageAction) updatePre(state *suiteState) {
 	state.imageStage[a.v.BaseImage] = imageProvision
 	delete(state.freeIDs, a.id)
+	state.networks[a.networkName].stage = networkBusy
 }
 
 func (a *provisionImageAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
-	a.err = provisionImage(ctx, suiteRun, a.id, a.v, a.provisionNet)
+	a.err = provisionImage(ctx, suiteRun, a.id, a.v, a.networkName)
 }
 
 func (a *provisionImageAction) updatePost(state *suiteState) {
+	state.networks[a.networkName].stage = networkReady
 	state.freeIDs[a.id] = true
-	state.freeNets.Free(a.provisionNet)
 	if a.err == nil {
 		state.imageStage[a.v.BaseImage] = imageReady
 	} else {
@@ -344,6 +489,48 @@ func (a *provisionImageAction) updatePost(state *suiteState) {
 		state.errors = append(state.errors,
 			fmt.Errorf("provision %s: %w", a.v.BaseImage, a.err))
 	}
+}
+
+type addNetworkAction struct {
+	networkName string
+	network     virterNet
+	access      bool
+	ipNet       *net.IPNet
+	err         error
+}
+
+func (a *addNetworkAction) name() string {
+	return fmt.Sprintf("Add network %s", a.networkName)
+}
+
+func (a *addNetworkAction) updatePre(state *suiteState) {
+	state.networks[a.networkName] = &networkState{
+		network:  a.network,
+		isAccess: a.access,
+		stage:    networkAdd,
+	}
+	if a.network.DHCP {
+		a.ipNet = state.freeNets.ReserveNext()
+	}
+}
+
+func (a *addNetworkAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
+	dhcpCount := 0
+	if a.access {
+		dhcpCount = suiteRun.nrVMs
+	}
+	a.err = addNetwork(ctx, a.networkName, a.network, a.ipNet, suiteRun.startVM, dhcpCount)
+}
+
+func (a *addNetworkAction) updatePost(state *suiteState) {
+	if a.err != nil {
+		state.errors = append(state.errors,
+			fmt.Errorf("add network %s: %w", a.networkName, a.err))
+		state.networks[a.networkName].stage = networkError
+		return
+	}
+
+	state.networks[a.networkName].stage = networkReady
 }
 
 func unwrapStderr(err error) {

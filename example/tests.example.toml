@@ -20,7 +20,6 @@ tags = ["podman"]
 vms = [2]
 tags = ["podman"]
 [[tests.extra_networks.networks]]
-name = "second-net"
 forward = "nat"
 dhcp = true
 domain = "second-net"

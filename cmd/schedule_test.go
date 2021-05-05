@@ -19,6 +19,10 @@ func TestChooseNextAction(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	networkName0 := "vmshed-0-access"
+	networkNames0 := []string{networkName0}
+	networkName1 := "vmshed-1-access"
+
 	testRun1VM := testRun{
 		testID: "t1VM",
 		vms:    []vm{vm0},
@@ -50,11 +54,15 @@ func TestChooseNextAction(t *testing.T) {
 			},
 			sequence: []step{
 				{
-					expected: []action{&performTestAction{run: &testRun2VM, ids: []int{5, 6}}},
+					expected: []action{accessNetworkAction(networkName0)},
 				},
 				{
-					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}},
-					expected: []action{&performTestAction{run: &testRun1VM, ids: []int{5}}},
+					result:   accessNetworkAction(networkName0),
+					expected: []action{&performTestAction{run: &testRun2VM, ids: []int{5, 6}, networkNames: networkNames0}},
+				},
+				{
+					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}, networkNames: networkNames0},
+					expected: []action{&performTestAction{run: &testRun1VM, ids: []int{5}, networkNames: networkNames0}},
 				},
 			},
 		},
@@ -70,10 +78,14 @@ func TestChooseNextAction(t *testing.T) {
 			},
 			sequence: []step{
 				{
-					expected: []action{&performTestAction{run: &testRun2VM, ids: []int{5, 6}}},
+					expected: []action{accessNetworkAction(networkName0)},
 				},
 				{
-					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}, res: testResult{err: errors.New("test failed")}},
+					result:   accessNetworkAction(networkName0),
+					expected: []action{&performTestAction{run: &testRun2VM, ids: []int{5, 6}, networkNames: networkNames0}},
+				},
+				{
+					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}, networkNames: networkNames0, res: testResult{err: errors.New("test failed")}},
 					expected: []action{nil},
 				},
 			},
@@ -89,22 +101,30 @@ func TestChooseNextAction(t *testing.T) {
 			},
 			sequence: []step{
 				{
+					expected: []action{accessNetworkAction(networkName0)},
+				},
+				{
+					result: accessNetworkAction(networkName0),
 					expected: []action{
-						&provisionImageAction{v: &vm0, id: 5},
-						&provisionImageAction{v: &vm1, id: 6},
+						&provisionImageAction{v: &vm0, id: 5, networkName: networkName0},
+						accessNetworkAction(networkName1),
 					},
 				},
 				{
-					result: &provisionImageAction{v: &vm0, id: 5},
+					result:   accessNetworkAction(networkName1),
+					expected: []action{&provisionImageAction{v: &vm1, id: 6, networkName: networkName1}},
+				},
+				{
+					result: &provisionImageAction{v: &vm0, id: 5, networkName: networkName0},
 					// larger tests are preferred, so do not expect testRun1VM to run yet
 				},
 				{
-					result:   &provisionImageAction{v: &vm1, id: 6},
-					expected: []action{&performTestAction{run: &testRun2VM, ids: []int{5, 6}}},
+					result:   &provisionImageAction{v: &vm1, id: 6, networkName: networkName1},
+					expected: []action{&performTestAction{run: &testRun2VM, ids: []int{5, 6}, networkNames: networkNames0}},
 				},
 				{
-					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}},
-					expected: []action{&performTestAction{run: &testRun1VM, ids: []int{5}}},
+					result:   &performTestAction{run: &testRun2VM, ids: []int{5, 6}, networkNames: networkNames0},
+					expected: []action{&performTestAction{run: &testRun1VM, ids: []int{5}, networkNames: networkNames0}},
 				},
 			},
 		},
@@ -119,17 +139,25 @@ func TestChooseNextAction(t *testing.T) {
 			},
 			sequence: []step{
 				{
+					expected: []action{accessNetworkAction(networkName0)},
+				},
+				{
+					result: accessNetworkAction(networkName0),
 					expected: []action{
-						&provisionImageAction{v: &vm0, id: 5},
-						&provisionImageAction{v: &vm1, id: 6},
+						&provisionImageAction{v: &vm0, id: 5, networkName: networkName0},
+						accessNetworkAction(networkName1),
 					},
 				},
 				{
-					result: &provisionImageAction{v: &vm0, id: 5},
+					result:   accessNetworkAction(networkName1),
+					expected: []action{&provisionImageAction{v: &vm1, id: 6, networkName: networkName1}},
+				},
+				{
+					result: &provisionImageAction{v: &vm0, id: 5, networkName: networkName0},
 					// larger tests are preferred, so do not expect testRun1VM to run yet
 				},
 				{
-					result: &provisionImageAction{v: &vm1, id: 6, err: errors.New("provision fail")},
+					result: &provisionImageAction{v: &vm1, id: 6, networkName: networkName0, err: errors.New("provision fail")},
 					// even though testRun1VM could run, expect suite run to stop due to provisioning failure
 					expected: []action{nil},
 				},
@@ -197,6 +225,10 @@ func validateAction(t *testing.T, a, e action) {
 		if !reflect.DeepEqual(actual.ids, expected.ids) {
 			t.Errorf("test uses wrong IDs, expected: '%v', actual: '%v'", expected.ids, actual.ids)
 		}
+
+		if !reflect.DeepEqual(actual.networkNames, expected.networkNames) {
+			t.Errorf("test uses wrong networks, expected: '%v', actual: '%v'", expected.networkNames, actual.networkNames)
+		}
 	case *provisionImageAction:
 		actual, ok := a.(*provisionImageAction)
 		if !ok {
@@ -210,7 +242,28 @@ func validateAction(t *testing.T, a, e action) {
 		if actual.id != expected.id {
 			t.Errorf("provisioning uses wrong ID, expected: '%d', actual: '%d'", expected.id, actual.id)
 		}
+
+		if actual.networkName != expected.networkName {
+			t.Errorf("provisioning uses wrong network, expected: '%s', actual: '%s'", expected.networkName, actual.networkName)
+		}
+	case *addNetworkAction:
+		actual, ok := a.(*addNetworkAction)
+		if !ok {
+			t.Fatalf("action type does not match, expected '%v', actual '%v'", reflect.TypeOf(expected), reflect.TypeOf(a))
+		}
+
+		if actual.networkName != expected.networkName {
+			t.Errorf("network name does not match, expected: '%s', actual: '%s'", expected.networkName, actual.networkName)
+		}
+
+		if actual.network.Domain != expected.network.Domain {
+			t.Errorf("network domain name does not match, expected: '%s', actual: '%s'", expected.network.Domain, actual.network.Domain)
+		}
 	default:
 		t.Fatalf("unhandled expected action type: '%v'", reflect.TypeOf(e))
 	}
+}
+
+func accessNetworkAction(name string) action {
+	return &addNetworkAction{networkName: name, network: accessNetwork()}
 }
