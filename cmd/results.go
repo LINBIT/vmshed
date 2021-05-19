@@ -10,7 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func saveResultsJSON(suiteRun testSuiteRun, results map[string]testResult) error {
+func saveResultsJSON(suiteRun testSuiteRun, startTime time.Time, results map[string]testResult) error {
 	type resultData struct {
 		ID         string    `json:"id"`
 		Time       time.Time `json:"time"`
@@ -22,9 +22,6 @@ func saveResultsJSON(suiteRun testSuiteRun, results map[string]testResult) error
 		Score      int       `json:"score"`
 		DurationNS int64     `json:"duration_ns"`
 	}
-
-	// record all results from the test suite run with the same timestamp
-	time := time.Now()
 
 	filename := filepath.Join(suiteRun.outDir, "results.json")
 	log.Printf("Saving results as JSON to %s", filename)
@@ -48,8 +45,9 @@ func saveResultsJSON(suiteRun testSuiteRun, results map[string]testResult) error
 		}
 
 		data := resultData{
-			ID:         testRun.testID,
-			Time:       time,
+			ID: testRun.testID,
+			// record all results from the test suite run with time from the start
+			Time:       startTime,
 			Name:       testRun.testName,
 			VMCount:    len(testRun.vms),
 			Variant:    testRun.variant.Name,

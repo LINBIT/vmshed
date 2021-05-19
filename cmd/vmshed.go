@@ -208,7 +208,7 @@ current user.`,
 				unwrapStderr(err)
 			}
 
-			if err := saveResultsJSON(suiteRun, results); err != nil {
+			if err := saveResultsJSON(suiteRun, start, results); err != nil {
 				log.Warnf("Failed to save JSON results: %v", err)
 			}
 
