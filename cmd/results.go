@@ -24,7 +24,7 @@ func saveResultsJSON(suiteRun testSuiteRun, startTime time.Time, results map[str
 	}
 
 	filename := filepath.Join(suiteRun.outDir, "results.json")
-	log.Printf("Saving results as JSON to %s", filename)
+	log.Infof("Saving results as JSON to %s", filename)
 	dest, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("Failed to create results JSON file: %w", err)

@@ -74,7 +74,7 @@ func runScheduler(ctx context.Context, suiteRun *testSuiteRun) map[string]testRe
 
 	nErrs := len(state.errors)
 	if nErrs == 0 {
-		log.Println("STATUS: All tests succeeded!")
+		log.Infoln("STATUS: All tests succeeded!")
 	} else {
 		log.Warnln("ERROR: Printing all errors")
 		for i, err := range state.errors {
@@ -134,7 +134,7 @@ func scheduleLoop(ctx context.Context, suiteRun *testSuiteRun, state *suiteState
 				break
 			}
 
-			log.Println("SCHEDULE: Perform action:", nextAction.name())
+			log.Debugln("SCHEDULE: Perform action:", nextAction.name())
 			nextAction.updatePre(state)
 			activeActions++
 			go func(a action) {
@@ -152,10 +152,10 @@ func scheduleLoop(ctx context.Context, suiteRun *testSuiteRun, state *suiteState
 			break
 		}
 
-		log.Println("SCHEDULE: Wait for result")
+		log.Debugln("SCHEDULE: Wait for result")
 		r := <-results
 		activeActions--
-		log.Println("SCHEDULE: Apply result for:", r.name())
+		log.Debugln("SCHEDULE: Apply result for:", r.name())
 		r.updatePost(state)
 
 		if runStopping(suiteRun, state) {
@@ -443,9 +443,14 @@ func (a *performTestAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
 }
 
 func (a *performTestAction) updatePost(state *suiteState) {
+	if log.GetLevel() < log.DebugLevel {
+		log.Infof("RESULT: %s - %s", a.run.testID, a.res.status)
+	} else {
+		fmt.Fprint(log.StandardLogger().Out, a.report)
+	}
+
 	state.runStage[a.run.testID] = runDone
 	state.runResults[a.run.testID] = a.res
-	fmt.Fprint(log.StandardLogger().Out, a.report)
 	if a.res.err != nil {
 		state.errors = append(state.errors,
 			fmt.Errorf("%s: %w", a.run.testID, a.res.err))
@@ -483,6 +488,7 @@ func (a *provisionImageAction) updatePost(state *suiteState) {
 	state.networks[a.networkName].stage = networkReady
 	state.freeIDs[a.id] = true
 	if a.err == nil {
+		log.Infof("STATUS: Successfully provisioned %s", a.v.BaseImage)
 		state.imageStage[a.v.BaseImage] = imageReady
 	} else {
 		state.imageStage[a.v.BaseImage] = imageError

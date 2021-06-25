@@ -36,7 +36,7 @@ func addNetwork(ctx context.Context, networkName string, network virterNet, ipNe
 		argv = append(argv, "--dhcp-id", strconv.Itoa(dhcpID), "--dhcp-count", strconv.Itoa(dhcpCount))
 	}
 
-	log.Printf("EXECUTING: %s", argv)
+	log.Debugf("EXECUTING: %s", argv)
 	err := cmdStderrTerm(ctx, logger, exec.Command(argv[0], argv[1:]...))
 	if err != nil {
 		log.WithError(err).Warnf("failed to create test network %s", networkName)
@@ -56,7 +56,7 @@ func removeNetwork(networkName string) error {
 	defer cancel()
 
 	argv := []string{"virter", "network", "rm", networkName}
-	log.Printf("EXECUTING: %s", argv)
+	log.Debugf("EXECUTING: %s", argv)
 	err := cmdStderrTerm(ctx, logger, exec.Command(argv[0], argv[1:]...))
 	if err != nil {
 		logger.WithError(err).Warnf("failed to remove test network %s", networkName)

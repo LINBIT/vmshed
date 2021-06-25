@@ -53,7 +53,7 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 
 	// clean up, should not be neccessary, but hey...
 	argv := []string{"virter", "image", "rm", newImageName}
-	log.Printf("EXECUTING: %s", argv)
+	log.Debugf("EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
 	cmd := exec.Command(argv[0], argv[1:]...)
 	if err := cmdStderrTerm(ctx, logger, cmd); err != nil {
@@ -90,10 +90,10 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	provisionCtx, cancel := context.WithTimeout(ctx, time.Duration(suiteRun.vmSpec.ProvisionTimeout))
 	defer cancel()
 
-	log.Printf("EXECUTING: %s", argv)
+	log.Debugf("EXECUTING: %s", argv)
 	start := time.Now()
 	err := cmdRunTerm(provisionCtx, logger, cmd)
-	log.Printf("EXECUTIONTIME: Provisioning image %s: %v", newImageName, time.Since(start))
+	log.Debugf("EXECUTIONTIME: Provisioning image %s: %v", newImageName, time.Since(start))
 
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		exitErr.Stderr = stderr.Bytes()
@@ -128,7 +128,7 @@ func removeImages(vmSpec *vmSpecification) {
 
 		// remove with "vm rm" in case the build failed leaving the provisioning VM running
 		argv := []string{"virter", "vm", "rm", newImageName}
-		log.Printf("EXECUTING: %s", argv)
+		log.Debugf("EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
 		if err := cmdStderrTerm(ctx, log.StandardLogger(), cmd); err != nil {
 			log.Errorf("ERROR: Could not remove image %s %v", newImageName, err)
@@ -165,7 +165,7 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 
 	// clean up, should not be neccessary, but hey...
 	argv := []string{"virter", "vm", "rm", vmName}
-	logger.Printf("EXECUTING: %s", argv)
+	logger.Debugf("EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
@@ -190,7 +190,7 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 	}
 	argv = append(argv, "--wait-ssh", vm.ImageName)
 
-	logger.Printf("EXECUTING: %s", argv)
+	logger.Debugf("EXECUTING: %s", argv)
 	cmd = exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
 	return cmdStderrTerm(ctx, logger, cmd)
@@ -204,7 +204,7 @@ func shutdownVMs(logger *log.Logger, testnodes ...vmInstance) error {
 		vmName := vm.vmName()
 
 		argv := []string{"virter", "vm", "rm", vmName}
-		logger.Printf("EXECUTING: %s", argv)
+		logger.Debugf("EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Env = virterEnv(vm.networkNames[0])
 		if err := cmdStderrTerm(ctx, logger, cmd); err != nil {

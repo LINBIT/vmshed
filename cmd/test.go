@@ -164,9 +164,9 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 
 func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessNetwork string, testnodes ...vmInstance) testResult {
 	res := testResult{}
-	logger := testLogger(&res.log, suiteRun.quiet)
+	logger := testLogger(&res.log)
 
-	logger.Printf("EXECUTING: %s Nodes(%+v)", run.testID, testnodes)
+	logger.Debugf("EXECUTING: %s Nodes(%+v)", run.testID, testnodes)
 
 	// Start VMs
 	start := time.Now()
@@ -176,7 +176,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 		res.err = err
 		return res
 	}
-	logger.Printf("EXECUTIONTIME: Starting VMs: %v", time.Since(start))
+	logger.Debugf("EXECUTIONTIME: Starting VMs: %v", time.Since(start))
 
 	testNameEnv := fmt.Sprintf("env.TEST_NAME=%s", run.testName)
 	outDirValue := fmt.Sprintf("values.OutDir=%s", run.outDir)
@@ -203,11 +203,11 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	testCtx, cancel := context.WithTimeout(ctx, time.Duration(suiteRun.testSpec.TestTimeout))
 	defer cancel()
 
-	logger.Printf("EXECUTING TEST: %s", argv)
+	logger.Debugf("EXECUTING TEST: %s", argv)
 	start = time.Now()
 	testErr := cmdRunTerm(testCtx, logger, cmd)
 	res.execTime = time.Since(start)
-	logger.Printf("EXECUTIONTIME: Running test %s: %v", run.testID, res.execTime)
+	logger.Debugf("EXECUTIONTIME: Running test %s: %v", run.testID, res.execTime)
 
 	if exitErr, ok := testErr.(*exec.ExitError); ok {
 		exitErr.Stderr = res.testLog.Bytes()
@@ -223,7 +223,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 			tgtPath := filepath.Join(run.outDir, vm.vmName(), filepath.Dir(directory))
 			os.MkdirAll(tgtPath, 0755)
 			if err := copyDir(logger, vm, directory, tgtPath); err != nil {
-				logger.Printf("ARTIFACTCOPY: FAILED copy artifact directory %s: %s", directory, err.Error())
+				logger.Infof("ARTIFACTCOPY: FAILED copy artifact directory %s: %s", directory, err.Error())
 				dumpStderr(logger, err)
 			}
 		}
@@ -237,24 +237,22 @@ func copyDir(logger log.FieldLogger, vm vmInstance, srcDir string, hostDir strin
 	defer cancel()
 
 	args := []string{"virter", "vm", "cp", vm.vmName() + ":" + srcDir, hostDir}
-	logger.Printf("EXECUTING VIRTER COPY: %s", args)
+	logger.Debugf("EXECUTING VIRTER COPY: %s", args)
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
 	return cmdStderrTerm(ctx, logger, cmd)
 }
 
-func testLogger(out io.Writer, quiet bool) *log.Logger {
+func testLogger(out io.Writer) *log.Logger {
 	logger := log.New()
 	logger.Out = out
+	logger.Level = log.DebugLevel
 	logger.Formatter = &log.TextFormatter{
 		DisableQuote:    true,
 		TimestampFormat: "15:04:05.000",
 	}
 
-	if !quiet {
-		logger.AddHook(&StandardLoggerHook{})
-	}
-
+	logger.AddHook(&StandardLoggerHook{})
 	return logger
 }
 
@@ -270,12 +268,5 @@ func (hook *StandardLoggerHook) Fire(entry *log.Entry) error {
 }
 
 func (hook *StandardLoggerHook) Levels() []log.Level {
-	return []log.Level{
-		log.PanicLevel,
-		log.FatalLevel,
-		log.ErrorLevel,
-		log.WarnLevel,
-		log.InfoLevel,
-		log.DebugLevel,
-	}
+	return log.AllLevels
 }

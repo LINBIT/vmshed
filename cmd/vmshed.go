@@ -84,7 +84,6 @@ type testSuiteRun struct {
 	nrVMs             int
 	firstNet          *net.IPNet
 	failTest          bool
-	quiet             bool
 	printErrorDetails bool
 }
 
@@ -143,6 +142,12 @@ current user.`,
 				return
 			}
 
+			if quiet {
+				log.SetLevel(log.InfoLevel)
+			} else {
+				log.SetLevel(log.DebugLevel)
+			}
+
 			if startVM <= 0 {
 				log.Fatal("--startvm has to be positive")
 			}
@@ -154,7 +159,7 @@ current user.`,
 				randomSeed = time.Now().UTC().UnixNano()
 			}
 
-			log.Printf("Using random seed: %d", randomSeed)
+			log.Infof("Using random seed: %d", randomSeed)
 			rand.Seed(randomSeed)
 
 			err := os.MkdirAll(outDir, 0755)
@@ -194,7 +199,6 @@ current user.`,
 			suiteRun.startVM = startVM
 			suiteRun.nrVMs = nrVMs
 			suiteRun.failTest = failTest
-			suiteRun.quiet = quiet
 			suiteRun.printErrorDetails = errorDetails
 			suiteRun.firstNet = firstNet
 
@@ -214,7 +218,7 @@ current user.`,
 
 			exitCode := printSummaryTable(suiteRun, results)
 
-			log.Println("OVERALL EXECUTIONTIME:", time.Since(start))
+			log.Infoln("OVERALL EXECUTIONTIME:", time.Since(start))
 			os.Exit(exitCode)
 		},
 	}
@@ -271,7 +275,7 @@ func createTestSuiteRun(
 			baseImages[i] = v.BaseImage
 		}
 		baseImageString := strings.Join(baseImages, ",")
-		log.Printf("PLAN: %s on %s", run.testID, baseImageString)
+		log.Infof("PLAN: %s on %s", run.testID, baseImageString)
 	}
 
 	suiteRun := testSuiteRun{
@@ -296,17 +300,17 @@ func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int
 		}
 	}
 	successRate := (float32(success) / float32(len(suiteRun.testRuns))) * 100
-	log.Println("|===================================================================================================")
-	log.Printf("| ** Results: %d/%d successful (%.2f%%)", success, len(suiteRun.testRuns), successRate)
-	log.Println("|===================================================================================================")
+	log.Infoln("|===================================================================================================")
+	log.Infof("| ** Results: %d/%d successful (%.2f%%)", success, len(suiteRun.testRuns), successRate)
+	log.Infoln("|===================================================================================================")
 	for _, testRun := range suiteRun.testRuns {
 		status := StatusSkipped
 		if result, ok := results[testRun.testID]; ok {
 			status = result.status
 		}
-		log.Printf("| %-20s: %s", status, testRun.testID)
+		log.Infof("| %-20s: %s", status, testRun.testID)
 	}
-	log.Println("|===================================================================================================")
+	log.Infoln("|===================================================================================================")
 	return exitCode
 }
 
@@ -473,16 +477,14 @@ func provisionAndExec(ctx context.Context, suiteRun *testSuiteRun) (map[string]t
 	// connect to one of them. Each VM has been provided a different key,
 	// but the test only has the key that was written last. Hence the first
 	// virter command run should not be parallel.
-	log.Println("STAGE: Initialize virter")
 	argv := []string{"virter", "image", "ls", "--available"}
-	log.Printf("EXECUTING: %s", argv)
+	log.Debugf("EXECUTING: %s", argv)
 	if err := exec.Command(argv[0], argv[1:]...).Run(); err != nil {
 		return map[string]testResult{}, fmt.Errorf("cannot initialize virter: %w", err)
 	}
 
 	defer removeImages(suiteRun.vmSpec)
 
-	log.Println("STAGE: Scheduler")
 	results := runScheduler(ctx, suiteRun)
 	return results, nil
 }
