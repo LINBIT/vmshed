@@ -2,6 +2,8 @@ name = "example"
 provision_file = "test-run-provision.virter.toml"
 provision_timeout = "40s"
 provision_boot_capacity = "14G"
+provision_memory = "2G"
+provision_cpus = 2
 
 [[vms]]
 vcpus = 2

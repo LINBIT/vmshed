@@ -80,6 +80,12 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	if suiteRun.vmSpec.ProvisionBootCap != "" {
 		argv = append(argv, "--bootcap", suiteRun.vmSpec.ProvisionBootCap)
 	}
+	if suiteRun.vmSpec.ProvisionMemory != "" {
+		argv = append(argv, "--memory", suiteRun.vmSpec.ProvisionMemory)
+	}
+	if suiteRun.vmSpec.ProvisionCPUs != 0 {
+		argv = append(argv, "--vcpus", fmt.Sprint(suiteRun.vmSpec.ProvisionCPUs))
+	}
 	argv = append(argv, v.BaseImage, newImageName)
 
 	cmd = exec.Command(argv[0], argv[1:]...)

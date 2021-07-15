@@ -44,6 +44,8 @@ type vmSpecification struct {
 	ProvisionFile    string   `toml:"provision_file"`
 	ProvisionTimeout duration `toml:"provision_timeout"`
 	ProvisionBootCap string   `toml:"provision_boot_capacity"`
+	ProvisionMemory  string   `toml:"provision_memory"`
+	ProvisionCPUs    uint     `toml:"provision_cpus"`
 	VMs              []vm     `toml:"vms"`
 }
 
