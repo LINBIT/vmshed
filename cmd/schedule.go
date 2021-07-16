@@ -302,7 +302,14 @@ func findExtraNetworks(state *suiteState, run *testRun) ([]string, []virterNet) 
 }
 
 func findReadyNetwork(state *suiteState, exclude map[string]bool, network virterNet, access bool) string {
-	for networkName, ns := range state.networks {
+	for i := 0; i < len(state.networks); i++ {
+		networkName := generateNetworkName(i, access)
+
+		ns, ok := state.networks[networkName]
+		if !ok {
+			continue
+		}
+
 		if ns.stage != networkReady {
 			continue
 		}
@@ -400,16 +407,20 @@ func makeAddNetworkAction(state *suiteState, network virterNet, access bool) act
 		}
 	}
 
+	return &addNetworkAction{
+		networkName: generateNetworkName(len(state.networks), access),
+		network:     network,
+		access:      access,
+	}
+}
+
+func generateNetworkName(id int, access bool) string {
 	networkType := "extra"
 	if access {
 		networkType = "access"
 	}
 
-	return &addNetworkAction{
-		networkName: fmt.Sprintf("vmshed-%d-%s", len(state.networks), networkType),
-		network:     network,
-		access:      access,
-	}
+	return fmt.Sprintf("vmshed-%d-%s", id, networkType)
 }
 
 func deleteAll(m map[int]bool, ints []int) {
