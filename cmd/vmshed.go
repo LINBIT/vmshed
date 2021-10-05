@@ -52,9 +52,9 @@ type vmSpecification struct {
 func (s *vmSpecification) ImageName(v *vm) string {
 	if s.ProvisionFile == "" {
 		// No provisioning, use base image directly
-		return v.BaseImage
+		return v.ID()
 	}
-	return fmt.Sprintf("%s-%s", v.BaseImage, s.Name)
+	return fmt.Sprintf("%s-%s", v.ID(), s.Name)
 }
 
 type testSpecification struct {
@@ -187,7 +187,7 @@ current user.`,
 			testSpec.TestSuiteFile = joinIfRel(filepath.Dir(testSpecPath), testSpec.TestSuiteFile)
 			testSpec.TestTimeout = durationDefault(testSpec.TestTimeout, 5*time.Minute)
 
-			suiteRun, err := createTestSuiteRun(vmSpec, testSpec, baseImages, toRun, outDir, repeats, variantsToRun)
+			suiteRun, err := createTestSuiteRun(vmSpec, testSpec, toRun, outDir, repeats, variantsToRun)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -248,7 +248,6 @@ current user.`,
 func createTestSuiteRun(
 	vmSpec vmSpecification,
 	testSpec testSpecification,
-	baseImages []string,
 	toRun string,
 	outDir string,
 	repeats int,
@@ -272,12 +271,12 @@ func createTestSuiteRun(
 	vmSpec.VMs = removeUnusedVMs(vmSpec.VMs, testRuns)
 
 	for _, run := range testRuns {
-		baseImages := make([]string, len(run.vms))
+		images := make([]string, len(run.vms))
 		for i, v := range run.vms {
-			baseImages[i] = v.BaseImage
+			images[i] = v.ID()
 		}
-		baseImageString := strings.Join(baseImages, ",")
-		log.Infof("PLAN: %s on %s", run.testID, baseImageString)
+		imageString := strings.Join(images, ",")
+		log.Infof("PLAN: %s on %s", run.testID, imageString)
 	}
 
 	suiteRun := testSuiteRun{
@@ -525,13 +524,13 @@ func removeUnusedVMs(vms []vm, testRuns []testRun) []vm {
 
 	for _, run := range testRuns {
 		for _, v := range run.vms {
-			usedVMs[v.BaseImage] = true
+			usedVMs[v.ID()] = true
 		}
 	}
 
 	selected := []vm{}
 	for _, v := range vms {
-		if usedVMs[v.BaseImage] {
+		if usedVMs[v.ID()] {
 			selected = append(selected, v)
 		}
 	}

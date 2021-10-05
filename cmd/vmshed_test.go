@@ -221,7 +221,7 @@ func TestDeterminedTests(t *testing.T) {
 			testSpec.TestTimeout = durationDefault(testSpec.TestTimeout, 5*time.Minute)
 
 			testSuiteRun, err := createTestSuiteRun(
-				vmSpec, testSpec, []string{}, test.toRun, "", test.repeats, test.variants)
+				vmSpec, testSpec, test.toRun, "", test.repeats, test.variants)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -238,8 +238,8 @@ func TestDeterminedTests(t *testing.T) {
 				} else {
 					if len(testSched) > 0 {
 						for _, vm := range tr.vms {
-							if !containsString(testSched, vm.BaseImage) {
-								t.Fatalf("Base %s not allowed for test %s", vm.BaseImage, tr.testID)
+							if !containsString(testSched, vm.ID()) {
+								t.Fatalf("Base %s not allowed for test %s", vm.ID(), tr.testID)
 							}
 						}
 					}

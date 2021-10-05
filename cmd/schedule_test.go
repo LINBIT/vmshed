@@ -235,8 +235,8 @@ func validateAction(t *testing.T, a, e action) {
 			t.Fatalf("action type does not match, expected '%v', actual '%v'", reflect.TypeOf(expected), reflect.TypeOf(a))
 		}
 
-		if actual.v.BaseImage != expected.v.BaseImage {
-			t.Errorf("VM base image does not match, expected: '%s', actual: '%s'", expected.v.BaseImage, actual.v.BaseImage)
+		if actual.v.ID() != expected.v.ID() {
+			t.Errorf("VM base image does not match, expected: '%s', actual: '%s'", expected.v.ID(), actual.v.ID())
 		}
 
 		if actual.id != expected.id {
