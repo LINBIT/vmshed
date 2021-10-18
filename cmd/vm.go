@@ -279,7 +279,7 @@ func handleTermination(ctx context.Context, logger log.FieldLogger, cmd *exec.Cm
 		logger.Warnln("TERMINATING: Send SIGTERM")
 		cmd.Process.Signal(unix.SIGTERM)
 		select {
-		case <-time.After(10 * time.Second):
+		case <-time.After(30 * time.Second):
 			logger.Errorln("TERMINATING: Send SIGKILL")
 			cmd.Process.Kill()
 		case <-complete:
