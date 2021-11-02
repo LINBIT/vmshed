@@ -158,6 +158,11 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	}
 	fmt.Fprintln(&report, "|===================================================================================================")
 
+	if err := ioutil.WriteFile(filepath.Join(run.outDir, "report.log"), report.Bytes(), 0644); err != nil {
+		log.Errorf("Failed to write report; suppressing original error: %v\n", testRes.err)
+		testRes.err = err
+	}
+
 	return report.String(), testRes
 }
 
