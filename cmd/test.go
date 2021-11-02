@@ -117,7 +117,8 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 		vms = append(vms, instance)
 	}
 
-	testRes := execTest(ctx, suiteRun, run, networkNames[0], vms...)
+	testRes := testResult{}
+	execTest(ctx, suiteRun, run, networkNames[0], vms, &testRes)
 
 	testRes.status = StatusSuccess
 	var testErr error
@@ -162,8 +163,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	return report.String(), testRes
 }
 
-func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessNetwork string, testnodes ...vmInstance) testResult {
-	res := testResult{}
+func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessNetwork string, testnodes []vmInstance, res *testResult) {
 	logger := testLogger(&res.log)
 
 	logger.Debugf("EXECUTING: %s Nodes(%+v)", run.testID, testnodes)
@@ -174,7 +174,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	defer shutdownVMs(logger, run.outDir, testnodes...)
 	if err != nil {
 		res.err = err
-		return res
+		return
 	}
 	logger.Debugf("EXECUTIONTIME: Starting VMs: %v", time.Since(start))
 
@@ -228,8 +228,6 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 			}
 		}
 	}
-
-	return res
 }
 
 func copyDir(logger log.FieldLogger, vm vmInstance, logDir string, srcDir string, hostDir string) error {
