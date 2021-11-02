@@ -201,7 +201,7 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 	return cmdStderrTerm(ctx, logger, stderrPath, cmd)
 }
 
-func shutdownVMs(logger *log.Logger, outDir string, testnodes ...vmInstance) error {
+func shutdownVMs(logger *log.Logger, outDir string, testnodes ...vmInstance) {
 	for _, vm := range testnodes {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -219,8 +219,6 @@ func shutdownVMs(logger *log.Logger, outDir string, testnodes ...vmInstance) err
 			// do not return, keep going...
 		}
 	}
-
-	return nil
 }
 
 func virterEnv(networkName string) []string {
