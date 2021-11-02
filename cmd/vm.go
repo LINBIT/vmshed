@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -202,11 +203,14 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 }
 
 func shutdownVMs(logger *log.Logger, outDir string, testnodes ...vmInstance) {
+	vmNames := make([]string, 0, len(testnodes))
+
 	for _, vm := range testnodes {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		vmName := vm.vmName()
+		vmNames = append(vmNames, vmName)
 
 		argv := []string{"virter", "vm", "rm", vmName}
 		stderrPath := filepath.Join(outDir, fmt.Sprintf("vm_rm_%s.log", vmName))
@@ -219,6 +223,9 @@ func shutdownVMs(logger *log.Logger, outDir string, testnodes ...vmInstance) {
 			// do not return, keep going...
 		}
 	}
+
+	// Log a line at the end so that the runtime of the commands above can be estimated
+	logger.Debugf("FINISH: VMs removed: %v", strings.Join(vmNames, " "))
 }
 
 func virterEnv(networkName string) []string {
