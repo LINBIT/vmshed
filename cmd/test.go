@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -167,7 +166,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 }
 
 func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessNetwork string, testnodes []vmInstance, res *testResult) {
-	logger := testLogger(&res.log)
+	logger := TestLogger(run.testID, &res.log)
 
 	logger.Debugf("EXECUTING: %s Nodes(%+v)", run.testID, testnodes)
 
@@ -243,32 +242,4 @@ func copyDir(logger log.FieldLogger, vm vmInstance, logDir string, srcDir string
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
 	return cmdStderrTerm(ctx, logger, stderrPath, cmd)
-}
-
-func testLogger(out io.Writer) *log.Logger {
-	logger := log.New()
-	logger.Out = out
-	logger.Level = log.DebugLevel
-	logger.Formatter = &log.TextFormatter{
-		DisableQuote:    true,
-		TimestampFormat: "15:04:05.000",
-	}
-
-	logger.AddHook(&StandardLoggerHook{})
-	return logger
-}
-
-// StandardLoggerHook duplicates log messages to the standard logger
-type StandardLoggerHook struct {
-}
-
-func (hook *StandardLoggerHook) Fire(entry *log.Entry) error {
-	logEntry := *entry
-	logEntry.Logger = log.StandardLogger()
-	logEntry.Log(logEntry.Level, logEntry.Message)
-	return nil
-}
-
-func (hook *StandardLoggerHook) Levels() []log.Level {
-	return log.AllLevels
 }

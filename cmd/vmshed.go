@@ -99,9 +99,7 @@ type testConfig struct {
 
 // Execute runs vmshed
 func Execute() {
-	log.SetFormatter(&log.TextFormatter{
-		TimestampFormat: "2006-01-02 15:04:05.000",
-	})
+	log.SetFormatter(VmshedStandardLogFormatter())
 
 	if err := rootCommand().Execute(); err != nil {
 		log.Fatal(err)
