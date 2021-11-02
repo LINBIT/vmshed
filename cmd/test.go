@@ -121,16 +121,14 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	execTest(ctx, suiteRun, run, networkNames[0], vms, &testRes)
 
 	testRes.status = StatusSuccess
-	var testErr error
 	if ctx.Err() != nil {
 		testRes.status = StatusCanceled
-		testErr = fmt.Errorf("canceled")
+		testRes.err = fmt.Errorf("canceled")
 	} else if testRes.timeout {
 		testRes.status = StatusFailedTimeout
-		testErr = fmt.Errorf("timeout: %w", testRes.err)
+		testRes.err = fmt.Errorf("timeout: %w", testRes.err)
 	} else if testRes.err != nil {
 		testRes.status = StatusFailed
-		testErr = testRes.err
 	}
 
 	var report bytes.Buffer
@@ -149,14 +147,14 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 
 	testLog := testRes.testLog.Bytes()
 	if err := ioutil.WriteFile(filepath.Join(run.outDir, "test.log"), testLog, 0644); err != nil {
-		fmt.Fprintf(&report, "| FAILED to write log; suppressing original error: %v\n", testErr)
-		testErr = err
+		fmt.Fprintf(&report, "| FAILED to write log; suppressing original error: %v\n", testRes.err)
+		testRes.err = err
 	}
 
 	resultsDir := filepath.Join(suiteRun.outDir, "test-results")
 	if err := XMLLog(resultsDir, run.testID, testRes, testLog); err != nil {
-		fmt.Fprintf(&report, "| FAILED to write XML log; suppressing original error: %v\n", testErr)
-		testErr = err
+		fmt.Fprintf(&report, "| FAILED to write XML log; suppressing original error: %v\n", testRes.err)
+		testRes.err = err
 	}
 	fmt.Fprintln(&report, "|===================================================================================================")
 
