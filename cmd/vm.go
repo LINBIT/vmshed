@@ -59,26 +59,22 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 		"ImageName": newImageName,
 	})
 
+	outDir := filepath.Join(suiteRun.outDir, "provision-log")
+
 	// clean up, should not be neccessary, but hey...
 	argv := []string{"virter", "image", "rm", newImageName}
+	rmStderrPath := filepath.Join(outDir, fmt.Sprintf("pre_image_rm_%s.log", newImageName))
 	log.Debugf("EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
 	cmd := exec.Command(argv[0], argv[1:]...)
-	if err := cmdStderrTerm(ctx, logger, cmd); err != nil {
-		return err
-	}
-
-	outDir := filepath.Join(suiteRun.outDir, "provision-log")
-	if err := os.MkdirAll(outDir, 0755); err != nil {
+	if err := cmdStderrTerm(ctx, logger, rmStderrPath, cmd); err != nil {
 		return err
 	}
 
 	argv = []string{"virter", "image", "build",
 		"--id", strconv.Itoa(nr),
-		"--provision", suiteRun.vmSpec.ProvisionFile}
-	if outDir != "" {
-		argv = append(argv, "--console", outDir)
-	}
+		"--provision", suiteRun.vmSpec.ProvisionFile,
+		"--console", outDir}
 	for _, override := range suiteRun.overrides {
 		argv = append(argv, "--set", override)
 	}
@@ -96,29 +92,18 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	}
 	argv = append(argv, v.BaseImage, newImageName)
 
+	stderrPath := filepath.Join(outDir, fmt.Sprintf("%s-provision.log", newImageName))
+
 	cmd = exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv(networkName)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
 
 	provisionCtx, cancel := context.WithTimeout(ctx, time.Duration(suiteRun.vmSpec.ProvisionTimeout))
 	defer cancel()
 
 	log.Debugf("EXECUTING: %s", argv)
 	start := time.Now()
-	err := cmdRunTerm(provisionCtx, logger, cmd)
+	err := cmdStderrTerm(provisionCtx, logger, stderrPath, cmd)
 	log.Debugf("EXECUTIONTIME: Provisioning image %s: %v", newImageName, time.Since(start))
-
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		exitErr.Stderr = stderr.Bytes()
-	}
-
-	if outDir != "" {
-		outPath := filepath.Join(outDir, fmt.Sprintf("%s-provision.log", newImageName))
-		if logWriteErr := ioutil.WriteFile(outPath, stderr.Bytes(), 0644); logWriteErr != nil {
-			return logWriteErr
-		}
-	}
 
 	if ctx.Err() != nil {
 		return fmt.Errorf("canceled")
@@ -129,10 +114,12 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	return err
 }
 
-func removeImages(vmSpec *vmSpecification) {
+func removeImages(outDir string, vmSpec *vmSpecification) {
 	if vmSpec.ProvisionFile == "" {
 		return
 	}
+
+	provisionOutDir := filepath.Join(outDir, "provision-log")
 
 	for _, v := range vmSpec.VMs {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -142,9 +129,10 @@ func removeImages(vmSpec *vmSpecification) {
 
 		// remove with "vm rm" in case the build failed leaving the provisioning VM running
 		argv := []string{"virter", "vm", "rm", newImageName}
+		stderrPath := filepath.Join(provisionOutDir, fmt.Sprintf("vm_rm_%s.log", newImageName))
 		log.Debugf("EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
-		if err := cmdStderrTerm(ctx, log.StandardLogger(), cmd); err != nil {
+		if err := cmdStderrTerm(ctx, log.StandardLogger(), stderrPath, cmd); err != nil {
 			log.Errorf("ERROR: Could not remove image %s %v", newImageName, err)
 			dumpStderr(log.StandardLogger(), err)
 			// do not return, keep going...
@@ -179,11 +167,12 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 
 	// clean up, should not be neccessary, but hey...
 	argv := []string{"virter", "vm", "rm", vmName}
+	rmStderrPath := filepath.Join(run.outDir, fmt.Sprintf("pre_vm_rm_%s.log", vmName))
 	logger.Debugf("EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
-	if err := cmdStderrTerm(ctx, logger, cmd); err != nil {
+	if err := cmdStderrTerm(ctx, logger, rmStderrPath, cmd); err != nil {
 		return err
 	}
 
@@ -204,13 +193,15 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 	}
 	argv = append(argv, "--wait-ssh", vm.ImageName)
 
+	stderrPath := filepath.Join(run.outDir, fmt.Sprintf("vm_run_%s.log", vmName))
+
 	logger.Debugf("EXECUTING: %s", argv)
 	cmd = exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
-	return cmdStderrTerm(ctx, logger, cmd)
+	return cmdStderrTerm(ctx, logger, stderrPath, cmd)
 }
 
-func shutdownVMs(logger *log.Logger, testnodes ...vmInstance) error {
+func shutdownVMs(logger *log.Logger, outDir string, testnodes ...vmInstance) error {
 	for _, vm := range testnodes {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -218,10 +209,11 @@ func shutdownVMs(logger *log.Logger, testnodes ...vmInstance) error {
 		vmName := vm.vmName()
 
 		argv := []string{"virter", "vm", "rm", vmName}
+		stderrPath := filepath.Join(outDir, fmt.Sprintf("vm_rm_%s.log", vmName))
 		logger.Debugf("EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Env = virterEnv(vm.networkNames[0])
-		if err := cmdStderrTerm(ctx, logger, cmd); err != nil {
+		if err := cmdStderrTerm(ctx, logger, stderrPath, cmd); err != nil {
 			logger.Errorf("ERROR: Could not stop VM %s: %v", vmName, err)
 			dumpStderr(logger, err)
 			// do not return, keep going...
@@ -236,7 +228,7 @@ func virterEnv(networkName string) []string {
 }
 
 // cmdStderrTerm runs a Cmd, collecting stderr and terminating gracefully
-func cmdStderrTerm(ctx context.Context, logger log.FieldLogger, cmd *exec.Cmd) error {
+func cmdStderrTerm(ctx context.Context, logger log.FieldLogger, stderrPath string, cmd *exec.Cmd) error {
 	var out bytes.Buffer
 	cmd.Stderr = &out
 
@@ -244,6 +236,20 @@ func cmdStderrTerm(ctx context.Context, logger log.FieldLogger, cmd *exec.Cmd) e
 
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		exitErr.Stderr = out.Bytes()
+	}
+
+	if mkdirErr := os.MkdirAll(filepath.Dir(stderrPath), 0755); mkdirErr != nil {
+		if err != nil {
+			logger.Errorf("Failed to create directory for stderr; suppressing original error: %v\n", err)
+		}
+		return mkdirErr
+	}
+
+	if stderrWriteErr := ioutil.WriteFile(stderrPath, out.Bytes(), 0644); stderrWriteErr != nil {
+		if err != nil {
+			logger.Errorf("Failed to write stderr; suppressing original error: %v\n", err)
+		}
+		return stderrWriteErr
 	}
 
 	return err

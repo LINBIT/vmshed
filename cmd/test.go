@@ -171,7 +171,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	// Start VMs
 	start := time.Now()
 	err := startVMs(ctx, logger, run, testnodes...)
-	defer shutdownVMs(logger, testnodes...)
+	defer shutdownVMs(logger, run.outDir, testnodes...)
 	if err != nil {
 		res.err = err
 		return res
@@ -222,7 +222,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 			// tgtPath will be /outdir/logs/{testname}/{vmname}/copy/path
 			tgtPath := filepath.Join(run.outDir, vm.vmName(), filepath.Dir(directory))
 			os.MkdirAll(tgtPath, 0755)
-			if err := copyDir(logger, vm, directory, tgtPath); err != nil {
+			if err := copyDir(logger, vm, run.outDir, directory, tgtPath); err != nil {
 				logger.Infof("ARTIFACTCOPY: FAILED copy artifact directory %s: %s", directory, err.Error())
 				dumpStderr(logger, err)
 			}
@@ -232,15 +232,16 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	return res
 }
 
-func copyDir(logger log.FieldLogger, vm vmInstance, srcDir string, hostDir string) error {
+func copyDir(logger log.FieldLogger, vm vmInstance, logDir string, srcDir string, hostDir string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	args := []string{"virter", "vm", "cp", vm.vmName() + ":" + srcDir, hostDir}
+	stderrPath := filepath.Join(logDir, fmt.Sprintf("vm_cp_%s_%s.log", vm.vmName(), strings.ReplaceAll(strings.TrimLeft(srcDir, "/"), "/", "-")))
 	logger.Debugf("EXECUTING VIRTER COPY: %s", args)
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
-	return cmdStderrTerm(ctx, logger, cmd)
+	return cmdStderrTerm(ctx, logger, stderrPath, cmd)
 }
 
 func testLogger(out io.Writer) *log.Logger {

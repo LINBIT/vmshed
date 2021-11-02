@@ -484,7 +484,7 @@ func provisionAndExec(ctx context.Context, suiteRun *testSuiteRun) (map[string]t
 		return map[string]testResult{}, fmt.Errorf("cannot initialize virter: %w", err)
 	}
 
-	defer removeImages(suiteRun.vmSpec)
+	defer removeImages(suiteRun.outDir, suiteRun.vmSpec)
 
 	results := runScheduler(ctx, suiteRun)
 	return results, nil

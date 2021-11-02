@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -11,7 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func addNetwork(ctx context.Context, networkName string, network virterNet, ipNet *net.IPNet, dhcpID int, dhcpCount int) error {
+func addNetwork(ctx context.Context, outDir string, networkName string, network virterNet, ipNet *net.IPNet, dhcpID int, dhcpCount int) error {
 	logger := log.WithFields(log.Fields{
 		"Action":      "AddNetwork",
 		"NetworkName": networkName,
@@ -36,8 +38,10 @@ func addNetwork(ctx context.Context, networkName string, network virterNet, ipNe
 		argv = append(argv, "--dhcp-id", strconv.Itoa(dhcpID), "--dhcp-count", strconv.Itoa(dhcpCount))
 	}
 
+	stderrPath := filepath.Join(outDir, "network-log", fmt.Sprintf("network_add_%s.log", networkName))
+
 	log.Debugf("EXECUTING: %s", argv)
-	err := cmdStderrTerm(ctx, logger, exec.Command(argv[0], argv[1:]...))
+	err := cmdStderrTerm(ctx, logger, stderrPath, exec.Command(argv[0], argv[1:]...))
 	if err != nil {
 		log.WithError(err).Warnf("failed to create test network %s", networkName)
 		return err
@@ -46,7 +50,7 @@ func addNetwork(ctx context.Context, networkName string, network virterNet, ipNe
 	return nil
 }
 
-func removeNetwork(networkName string) error {
+func removeNetwork(outDir string, networkName string) error {
 	logger := log.WithFields(log.Fields{
 		"Action":      "RemoveNetwork",
 		"NetworkName": networkName,
@@ -56,8 +60,9 @@ func removeNetwork(networkName string) error {
 	defer cancel()
 
 	argv := []string{"virter", "network", "rm", networkName}
+	stderrPath := filepath.Join(outDir, "network-log", fmt.Sprintf("network_rm_%s.log", networkName))
 	log.Debugf("EXECUTING: %s", argv)
-	err := cmdStderrTerm(ctx, logger, exec.Command(argv[0], argv[1:]...))
+	err := cmdStderrTerm(ctx, logger, stderrPath, exec.Command(argv[0], argv[1:]...))
 	if err != nil {
 		logger.WithError(err).Warnf("failed to remove test network %s", networkName)
 		return err

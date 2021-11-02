@@ -68,7 +68,7 @@ type action interface {
 
 func runScheduler(ctx context.Context, suiteRun *testSuiteRun) map[string]testResult {
 	state := initializeState(suiteRun)
-	defer tearDown(state)
+	defer tearDown(suiteRun, state)
 
 	scheduleLoop(ctx, suiteRun, state)
 
@@ -164,9 +164,9 @@ func scheduleLoop(ctx context.Context, suiteRun *testSuiteRun, state *suiteState
 	}
 }
 
-func tearDown(state *suiteState) {
+func tearDown(suiteRun *testSuiteRun, state *suiteState) {
 	for networkName := range state.networks {
-		err := removeNetwork(networkName)
+		err := removeNetwork(suiteRun.outDir, networkName)
 		if err != nil {
 			state.errors = append(state.errors, err)
 		}
@@ -536,7 +536,7 @@ func (a *addNetworkAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
 	if a.access {
 		dhcpCount = suiteRun.nrVMs
 	}
-	a.err = addNetwork(ctx, a.networkName, a.network, a.ipNet, suiteRun.startVM, dhcpCount)
+	a.err = addNetwork(ctx, suiteRun.outDir, a.networkName, a.network, a.ipNet, suiteRun.startVM, dhcpCount)
 }
 
 func (a *addNetworkAction) updatePost(state *suiteState) {
