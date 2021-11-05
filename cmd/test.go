@@ -54,7 +54,6 @@ type testResult struct {
 	testLog  bytes.Buffer // output of the test itself ('virter vm exec' output)
 	execTime time.Duration
 	err      error
-	timeout  bool
 	status   TestStatus
 }
 
@@ -116,19 +115,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 		vms = append(vms, instance)
 	}
 
-	testRes := testResult{}
-	execTest(ctx, suiteRun, run, networkNames[0], vms, &testRes)
-
-	testRes.status = StatusSuccess
-	if ctx.Err() != nil {
-		testRes.status = StatusCanceled
-		testRes.err = fmt.Errorf("canceled")
-	} else if testRes.timeout {
-		testRes.status = StatusFailedTimeout
-		testRes.err = fmt.Errorf("timeout: %w", testRes.err)
-	} else if testRes.err != nil {
-		testRes.status = StatusFailed
-	}
+	testRes := execTest(ctx, suiteRun, run, networkNames[0], vms)
 
 	var report bytes.Buffer
 
@@ -165,7 +152,8 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	return report.String(), testRes
 }
 
-func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessNetwork string, testnodes []vmInstance, res *testResult) {
+func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessNetwork string, testnodes []vmInstance) testResult {
+	res := testResult{}
 	logger := TestLogger(run.testID, &res.log)
 
 	logger.Debugf("EXECUTING: %s Nodes(%+v)", run.testID, testnodes)
@@ -175,8 +163,9 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	err := startVMs(ctx, logger, run, testnodes...)
 	defer shutdownVMs(logger, run.outDir, testnodes...)
 	if err != nil {
+		res.status = StatusSkipped
 		res.err = fmt.Errorf("failed to start VMs: %w", err)
-		return
+		return res
 	}
 	logger.Debugf("EXECUTIONTIME: Starting VMs: %v", time.Since(start))
 
@@ -207,16 +196,10 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 
 	logger.Debugf("EXECUTING TEST: %s", argv)
 	start = time.Now()
-	testErr := cmdRunTerm(testCtx, logger, cmd)
+	res.err = cmdRunTerm(testCtx, logger, cmd)
+	timeout := testCtx.Err() != nil
 	res.execTime = time.Since(start)
 	logger.Debugf("EXECUTIONTIME: Running test %s: %v", run.testID, res.execTime)
-
-	if exitErr, ok := testErr.(*exec.ExitError); ok {
-		exitErr.Stderr = res.testLog.Bytes()
-	}
-
-	res.err = testErr
-	res.timeout = testCtx.Err() != nil
 
 	// copy artifacts from VMs
 	for _, vm := range testnodes {
@@ -230,6 +213,20 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 			}
 		}
 	}
+
+	if ctx.Err() != nil {
+		res.status = StatusCanceled
+		res.err = fmt.Errorf("canceled")
+	} else if timeout {
+		res.status = StatusFailedTimeout
+		res.err = fmt.Errorf("timeout: %w", res.err)
+	} else if res.err != nil {
+		res.status = StatusFailed
+	} else {
+		res.status = StatusSuccess
+	}
+
+	return res
 }
 
 func copyDir(logger log.FieldLogger, vm vmInstance, logDir string, srcDir string, hostDir string) error {

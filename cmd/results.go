@@ -36,11 +36,11 @@ func saveResultsJSON(suiteRun testSuiteRun, startTime time.Time, results map[str
 	for _, testRun := range suiteRun.testRuns {
 		result, ok := results[testRun.testID]
 		if !ok {
-			// exclude skipped runs
+			// exclude runs that were skipped entirely
 			continue
 		}
-		if result.status == StatusCanceled {
-			// exclude canceled runs
+		if result.status == StatusCanceled || result.status == StatusSkipped {
+			// exclude canceled runs and those that were skipped while running
 			continue
 		}
 
