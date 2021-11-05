@@ -125,9 +125,8 @@ func removeImages(outDir string, vmSpec *vmSpecification) {
 
 		newImageName := vmSpec.ImageName(&v)
 
-		// remove with "vm rm" in case the build failed leaving the provisioning VM running
-		argv := []string{"virter", "vm", "rm", newImageName}
-		stderrPath := filepath.Join(provisionOutDir, fmt.Sprintf("vm_rm_%s.log", newImageName))
+		argv := []string{"virter", "image", "rm", newImageName}
+		stderrPath := filepath.Join(provisionOutDir, fmt.Sprintf("image_rm_%s.log", newImageName))
 		log.Debugf("EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
 		if err := cmdStderrTerm(ctx, log.StandardLogger(), stderrPath, cmd); err != nil {
