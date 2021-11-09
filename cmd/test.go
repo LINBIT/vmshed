@@ -201,6 +201,10 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	res.execTime = time.Since(start)
 	logger.Debugf("EXECUTIONTIME: Running test %s: %v", run.testID, res.execTime)
 
+	if exitErr, ok := res.err.(*exec.ExitError); ok {
+		exitErr.Stderr = res.testLog.Bytes()
+	}
+
 	// copy artifacts from VMs
 	for _, vm := range testnodes {
 		for _, directory := range suiteRun.testSpec.Artifacts {
