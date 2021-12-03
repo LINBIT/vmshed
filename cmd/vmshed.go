@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -302,7 +303,11 @@ func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int
 	log.Infoln("|===================================================================================================")
 	log.Infof("| ** Results: %d/%d successful (%.2f%%)", success, len(suiteRun.testRuns), successRate)
 	log.Infoln("|===================================================================================================")
-	for _, testRun := range suiteRun.testRuns {
+	sortedTestRuns := suiteRun.testRuns
+	sort.SliceStable(sortedTestRuns, func(i, j int) bool {
+		return sortedTestRuns[i].testName < sortedTestRuns[j].testName
+	})
+	for _, testRun := range sortedTestRuns {
 		status := StatusSkipped
 		tduration := 0 * time.Second
 		if result, ok := results[testRun.testID]; ok {
