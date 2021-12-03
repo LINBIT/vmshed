@@ -218,7 +218,7 @@ current user.`,
 
 			exitCode := printSummaryTable(suiteRun, results)
 
-			log.Infoln("OVERALL EXECUTIONTIME:", time.Since(start))
+			log.Infoln("OVERALL EXECUTIONTIME:", time.Since(start).Round(time.Second))
 			os.Exit(exitCode)
 		},
 	}
@@ -304,10 +304,12 @@ func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int
 	log.Infoln("|===================================================================================================")
 	for _, testRun := range suiteRun.testRuns {
 		status := StatusSkipped
+		tduration := 0 * time.Second
 		if result, ok := results[testRun.testID]; ok {
 			status = result.status
+			tduration = result.execTime
 		}
-		log.Infof("| %-20s: %s", status, testRun.testID)
+		log.Infof("| %-11s: %-73s : %9s", status, testRun.testID, tduration.Round(time.Second))
 	}
 	log.Infoln("|===================================================================================================")
 	return exitCode

@@ -38,7 +38,7 @@ const (
 	StatusSkipped       TestStatus = "SKIPPED"
 	StatusSuccess       TestStatus = "SUCCESS"
 	StatusCanceled      TestStatus = "CANCELED"
-	StatusFailedTimeout TestStatus = "FAILED (TIMEOUT)"
+	StatusFailedTimeout TestStatus = "FAILED(TO)"
 	StatusFailed        TestStatus = "FAILED"
 )
 
