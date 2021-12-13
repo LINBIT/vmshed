@@ -121,10 +121,11 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 
 	fmt.Fprintln(&report, "|===================================================================================================")
 	fmt.Fprintf(&report, "| ** Results for %s - %s\n", run.testID, testRes.status)
-	jobURL := os.Getenv("CI_JOB_URL")
-	if jobURL != "" {
-		fmt.Fprintf(&report, "| ** %s/artifacts/browse/%s\n", jobURL, run.outDir)
+	artifactsUrl := getArtifactsUrl(run.outDir)
+	if artifactsUrl != "" {
+		fmt.Fprintf(&report, "| ** %s\n", artifactsUrl)
 	}
+
 	fmt.Fprintln(&report, "|===================================================================================================")
 	logLines := strings.Split(strings.TrimSpace(testRes.log.String()), "\n")
 	for _, line := range logLines {
@@ -243,4 +244,28 @@ func copyDir(logger log.FieldLogger, vm vmInstance, logDir string, srcDir string
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
 	return cmdStderrTerm(ctx, logger, stderrPath, cmd)
+}
+
+func getArtifactsUrl(outdir string) string {
+	jobURL := os.Getenv("CI_JOB_URL")
+	if jobURL == "" {
+		return ""
+	}
+
+	buildRoot := os.Getenv("CI_PROJECT_DIR")
+	if buildRoot == "" {
+		return ""
+	}
+
+	abs, err := filepath.Abs(outdir)
+	if err != nil {
+		return ""
+	}
+
+	relOut, err := filepath.Rel(buildRoot, abs)
+	if err != nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%s/artifacts/browse/%s", jobURL, relOut)
 }
