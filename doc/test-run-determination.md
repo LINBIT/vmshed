@@ -41,8 +41,11 @@ VM base images must be assigned to each test run. The available base images are
 defined by the `vms` entries in the VM specification. They are filtered by:
 
 * `--base-image` flag
-* The `tags` array in the `vms` entry must be a superset of `tags` in the
-  `tests` table in the test specification for the test in question
+* The `vm_tags` array in the `vms` entry must be a superset of:
+  * `vm_tags` in the `tests` table in the test specification for the test in
+    question; and
+  * `vm_tags` in the `variants` entry in the test specification for the variant
+    in question
 
 The base images are assigned to the test runs as follows:
 

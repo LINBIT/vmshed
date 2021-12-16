@@ -22,7 +22,7 @@ type vm struct {
 	VCPUs     uint              `toml:"vcpus"`
 	BootCap   string            `toml:"boot_capacity"`
 	Disks     []string          `toml:"disks"`
-	Tags      []string          `toml:"tags"`
+	VMTags    []string          `toml:"vm_tags"`
 }
 
 func (v *vm) ID() string {

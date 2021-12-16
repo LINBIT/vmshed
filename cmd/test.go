@@ -16,7 +16,7 @@ import (
 
 type test struct {
 	VMCount          []int       `toml:"vms"`
-	Tags             []string    `toml:"tags"`
+	VMTags           []string    `toml:"vm_tags"`
 	SameVMs          bool        `toml:"samevms"`          // test need the same Distribution
 	NeedAllPlatforms bool        `toml:"needallplatforms"` // test need to run on all platforms
 	Variants         []string    `toml:"variants"`         // only run on given variants, if empty all

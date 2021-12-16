@@ -25,7 +25,7 @@ func TestLoadTestsToml(t *testing.T) {
 
 	[tests.test_migrate_etcd]
 	vms = [2]
-	tags = ["etcd"]
+	vm_tags = ["etcd"]
 
 	[tests.add-connect-delete]
 	vms = [2]
@@ -63,18 +63,18 @@ provision_file = "provision-test.toml"
 
 [[vms]]
 base_image = "centos-8-linstor-k193"
-tags = ["postgresql", "mariadb"]
+vm_tags = ["postgresql", "mariadb"]
 
 [[vms]]
 base_image = "ubuntu-xenial-linstor-k185"
 
 [[vms]]
 base_image = "ubuntu-bionic-linstor-k109"
-tags = ["zfs", "postgresql", "mariadb"]
+vm_tags = ["zfs", "postgresql", "mariadb"]
 
 [[vms]]
 base_image = "ubuntu-focal-linstor-k40"
-tags = ["zfs", "postgresql", "mariadb"]
+vm_tags = ["zfs", "postgresql", "mariadb"]
 `
 
 func TestDeterminedTests(t *testing.T) {
@@ -98,7 +98,7 @@ func TestDeterminedTests(t *testing.T) {
 
 			[tests.test_zfs_disk2_diskless1]
 			vms = [3]
-			tags = ['zfs']`,
+			vm_tags = ['zfs']`,
 			repeats: 1,
 			testIds: testSchedules{
 				"test_list_commands-1-default-0": []string{},
@@ -145,7 +145,7 @@ func TestDeterminedTests(t *testing.T) {
 
 			[tests.test_zfs_disk2_diskless1]
 			vms = [3]
-			tags = ['zfs']`,
+			vm_tags = ['zfs']`,
 			repeats: 1,
 			toRun:   "test_list_commands,test_auto_place_replicas_on_same",
 			testIds: testSchedules{
@@ -199,6 +199,33 @@ func TestDeterminedTests(t *testing.T) {
 			testIds: testSchedules{
 				"test_list_commands-1-etcd-0": []string{},
 				"test_list_commands-2-etcd-0": []string{},
+			},
+		},
+		{
+			name:   "variantVMTags",
+			vmSpec: vmSpecToml,
+			testSpec: `test_suite_file = "run.toml"
+
+			[[variants]]
+			name = "default"
+
+			[[variants]]
+			name = "etcd"
+			vm_tags = ["zfs"]
+
+			[tests]
+			[tests.test_list_commands]
+			vms = [1]
+			needallplatforms = true`,
+			repeats:  1,
+			variants: []string{},
+			testIds: testSchedules{
+				"test_list_commands-1-default-0": []string{"centos-8-linstor-k193"},
+				"test_list_commands-1-default-1": []string{"ubuntu-xenial-linstor-k185"},
+				"test_list_commands-1-default-2": []string{"ubuntu-bionic-linstor-k109"},
+				"test_list_commands-1-default-3": []string{"ubuntu-focal-linstor-k40"},
+				"test_list_commands-1-etcd-0":    []string{"ubuntu-bionic-linstor-k109"},
+				"test_list_commands-1-etcd-1":    []string{"ubuntu-focal-linstor-k40"},
 			},
 		},
 	}

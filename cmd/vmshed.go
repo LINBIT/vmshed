@@ -69,6 +69,7 @@ type testSpecification struct {
 type variant struct {
 	Name      string            `toml:"name"`
 	Variables map[string]string `toml:"variables"`
+	VMTags    []string          `toml:"vm_tags"`
 }
 
 type virterNet struct {
@@ -372,8 +373,15 @@ func determineRunsForTest(config *testConfig, variants []variant) ([]testRun, er
 			continue
 		}
 
+		variantVMs := matchingVMTags(variant.VMTags, config.vmSpec.VMs)
+		availableVMs := matchingVMTags(config.test.VMTags, variantVMs)
+		if len(availableVMs) == 0 {
+			log.Infof("SKIP: test:%s variant:%s - no available VMs", config.testName, variant.Name)
+			continue
+		}
+
 		for _, vmCount := range config.test.VMCount {
-			variantRuns, err := determineRunsForTestVariant(config, vmCount, variant)
+			variantRuns, err := determineRunsForTestVariant(config, vmCount, variant, availableVMs)
 			if err != nil {
 				return []testRun{}, err
 			}
@@ -384,17 +392,17 @@ func determineRunsForTest(config *testConfig, variants []variant) ([]testRun, er
 	return testRuns, nil
 }
 
-func determineRunsForTestVariant(config *testConfig, vmCount int, testVariant variant) ([]testRun, error) {
+func determineRunsForTestVariant(config *testConfig, vmCount int, testVariant variant, availableVMs []vm) ([]testRun, error) {
 	testRuns := []testRun{}
 
 	for repeatCounter := 0; repeatCounter < config.repeats; repeatCounter++ {
 		if config.test.NeedAllPlatforms {
-			for _, v := range matchingVMTags(config) {
+			for _, v := range availableVMs {
 				testRuns = append(testRuns, newTestRun(
 					config, testVariant, repeatVM(v, vmCount), len(testRuns)))
 			}
 		} else if config.test.SameVMs {
-			v, err := randomVMWithTags(config)
+			v, err := randomVM(availableVMs)
 			if err != nil {
 				return nil, err
 			}
@@ -403,7 +411,7 @@ func determineRunsForTestVariant(config *testConfig, vmCount int, testVariant va
 		} else {
 			var vms []vm
 			for i := 0; i < vmCount; i++ {
-				v, err := randomVMWithTags(config)
+				v, err := randomVM(availableVMs)
 				if err != nil {
 					return nil, err
 				}
@@ -426,7 +434,7 @@ func repeatVM(v vm, count int) []vm {
 
 func randomVM(vms []vm) (vm, error) {
 	if len(vms) == 0 {
-		return vm{}, fmt.Errorf("Unable to random VM from empty array")
+		return vm{}, fmt.Errorf("Unable to randomly choose VM from empty array")
 	}
 	return vms[rand.Int63n(int64(len(vms)))], nil
 }
@@ -440,25 +448,23 @@ func containsString(s []string, e string) bool {
 	return false
 }
 
-func matchingVMTags(config *testConfig) []vm {
-	possibleVMs := []vm{}
-	for _, vm := range config.vmSpec.VMs {
-		hasAllTags := true
-		for _, tag := range config.test.Tags {
-			if !containsString(vm.Tags, tag) {
-				hasAllTags = false
-				break
-			}
+func containsAllStrings(values, required []string) bool {
+	for _, e := range required {
+		if !containsString(values, e) {
+			return false
 		}
-		if hasAllTags {
+	}
+	return true
+}
+
+func matchingVMTags(requiredVMTags []string, vms []vm) []vm {
+	possibleVMs := []vm{}
+	for _, vm := range vms {
+		if containsAllStrings(vm.VMTags, requiredVMTags) {
 			possibleVMs = append(possibleVMs, vm)
 		}
 	}
 	return possibleVMs
-}
-
-func randomVMWithTags(config *testConfig) (vm, error) {
-	return randomVM(matchingVMTags(config))
 }
 
 func newTestRun(config *testConfig, variant variant, vms []vm, testIndex int) testRun {

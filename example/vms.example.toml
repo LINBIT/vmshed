@@ -11,4 +11,12 @@ memory = "6G"
 boot_capacity = "20G"
 base_image = "centos-7"
 disks = ["name=data,size=5GiB"]
-tags = ["podman"]
+vm_tags = ["podman"]
+
+[[vms]]
+vcpus = 2
+memory = "1G"
+boot_capacity = "3G"
+base_image = "ubuntu-focal"
+disks = ["name=data,size=5GiB"]
+vm_tags = ["mariadb-server"]
