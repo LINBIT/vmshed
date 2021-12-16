@@ -19,20 +19,6 @@ vmshed --tests example/tests.example.toml --vms example/vms.example.toml
 The test runs are determined based on these specification files and the command
 line flags as described [here](doc/test-run-determination.md).
 
-## Usage in Docker
-
-Running vmshed in Docker is a little complicated due to its dependencies. Here
-is an example:
-
-```
-$ docker run -it --rm -v /my-config/virter:/root/.config/virter:ro \
-  -v /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v `pwd`/example:/opt/virter/example \
-  --network=host \
-  vmshed --tests example/tests.example.toml --vms example/vms.example.toml
-```
-
 ## Tests specification
 
 The tests specification is a TOML file that is provided with the `--tests`
