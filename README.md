@@ -16,6 +16,9 @@ Example:
 vmshed --tests example/tests.example.toml --vms example/vms.example.toml
 ```
 
+The test runs are determined based on these specification files and the command
+line flags as described [here](doc/test-run-determination.md).
+
 ## Usage in Docker
 
 Running vmshed in Docker is a little complicated due to its dependencies. Here
