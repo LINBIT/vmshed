@@ -83,6 +83,8 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 		var vcpus uint
 		var bootCap string
 		var disks []string
+		var userName string
+
 		if v.Memory != "" {
 			memory = v.Memory
 		} else {
@@ -103,6 +105,8 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 		} else {
 			disks = []string{"name=data,size=2G,bus=scsi"}
 		}
+		userName = v.UserName
+
 		instance := vmInstance{
 			ImageName:    suiteRun.vmSpec.ImageName(&v),
 			nr:           ids[i],
@@ -111,6 +115,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 			bootCap:      bootCap,
 			disks:        disks,
 			networkNames: networkNames,
+			UserName:     userName,
 		}
 		vms = append(vms, instance)
 	}

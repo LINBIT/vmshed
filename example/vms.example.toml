@@ -11,7 +11,7 @@ memory = "6G"
 boot_capacity = "20G"
 base_image = "centos-7"
 disks = ["name=data,size=5GiB"]
-vm_tags = ["podman"]
+vm_tags = ["linux", "podman"]
 
 [[vms]]
 vcpus = 2
@@ -19,4 +19,12 @@ memory = "1G"
 boot_capacity = "3G"
 base_image = "ubuntu-focal"
 disks = ["name=data,size=5GiB"]
-vm_tags = ["mariadb-server"]
+vm_tags = ["linux", "mariadb-server"]
+
+[[vms]]
+base_image = "windows-server-2019"
+vcpus = 2
+memory = "4G"
+disks = ["name=windows_scratch,size=100GiB"]
+vm_tags = ["windows"]
+user_name = "Administrator"

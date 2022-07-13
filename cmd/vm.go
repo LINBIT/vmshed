@@ -23,6 +23,7 @@ type vm struct {
 	BootCap   string            `toml:"boot_capacity"`
 	Disks     []string          `toml:"disks"`
 	VMTags    []string          `toml:"vm_tags"`
+	UserName  string            `toml:"user_name"`
 }
 
 func (v *vm) ID() string {
@@ -40,6 +41,7 @@ type vmInstance struct {
 	bootCap      string
 	disks        []string
 	networkNames []string
+	UserName     string
 }
 
 func (vm vmInstance) vmName() string {
@@ -88,6 +90,16 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	if suiteRun.vmSpec.ProvisionCPUs != 0 {
 		argv = append(argv, "--vcpus", fmt.Sprint(suiteRun.vmSpec.ProvisionCPUs))
 	}
+	/* For Windows you may want to specify
+	 * user_name = "Administrator"
+	 * in your vms.toml.
+	 */
+	if v.UserName != "" {
+		argv = append(argv, "--user", v.UserName)
+	}
+	/* Useful for debugging - port defaults to 6000+vm_id */
+	argv = append(argv, "--vnc")
+	argv = append(argv, "--vnc-bind-ip", "0.0.0.0")
 	argv = append(argv, v.BaseImage, newImageName)
 
 	stderrPath := filepath.Join(outDir, fmt.Sprintf("%s-provision.log", newImageName))
@@ -189,6 +201,12 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 		argv = append(argv, "--nic", fmt.Sprintf("type=network,source=%s", networkName))
 	}
 	argv = append(argv, "--wait-ssh", vm.ImageName)
+
+	if vm.UserName != "" {
+		argv = append(argv, "--user", vm.UserName)
+	}
+	argv = append(argv, "--vnc")
+	argv = append(argv, "--vnc-bind-ip", "0.0.0.0")
 
 	stderrPath := filepath.Join(run.outDir, fmt.Sprintf("vm_run_%s.log", vmName))
 
