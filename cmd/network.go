@@ -13,7 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func addNetwork(ctx context.Context, outDir string, networkName string, network virterNet, ipNet *net.IPNet, dhcpID int, dhcpCount int) error {
+func addNetwork(ctx context.Context, outDir string, networkName string, network virterNet, ipV4Net, ipV6Net *net.IPNet, dhcpID int, dhcpCount int) error {
 	logger := log.WithFields(log.Fields{
 		"Action":      "AddNetwork",
 		"NetworkName": networkName,
@@ -21,12 +21,17 @@ func addNetwork(ctx context.Context, outDir string, networkName string, network 
 
 	argv := []string{"virter", "network", "add", networkName}
 	if network.DHCP {
-		if ipNet == nil {
+		if ipV4Net == nil {
 			panic("cannot add network with DHCP without an IPNet")
 		}
-		gatewayAddress := cidr.Inc(ipNet.IP)
-		networkCidr := net.IPNet{IP: gatewayAddress, Mask: ipNet.Mask}
+		gatewayAddress := cidr.Inc(ipV4Net.IP)
+		networkCidr := net.IPNet{IP: gatewayAddress, Mask: ipV4Net.Mask}
 		argv = append(argv, "--network-cidr", networkCidr.String(), "--dhcp")
+		if ipV6Net != nil {
+			gatewayAddress := cidr.Inc(ipV6Net.IP)
+			networkCidr := net.IPNet{IP: gatewayAddress, Mask: ipV6Net.Mask}
+			argv = append(argv, "--network-v6-cidr", networkCidr.String())
+		}
 	}
 	if network.ForwardMode != "" {
 		argv = append(argv, "--forward-mode", network.ForwardMode)
@@ -70,10 +75,11 @@ func removeNetwork(outDir string, networkName string) error {
 	return nil
 }
 
-func accessNetwork() virterNet {
+func accessNetwork(ipv6 bool) virterNet {
 	return virterNet{
 		Domain:      "test",
 		ForwardMode: "nat",
 		DHCP:        true,
+		IPv6:        ipv6,
 	}
 }

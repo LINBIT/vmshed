@@ -46,11 +46,11 @@ func TestChooseNextAction(t *testing.T) {
 		{
 			name: "prefer-larger-test",
 			suiteRun: testSuiteRun{
-				vmSpec:   &vmSpecification{VMs: []vm{vm0, vm1}},
-				testRuns: []testRun{testRun1VM, testRun2VM},
-				startVM:  5,
-				nrVMs:    2,
-				firstNet: baseNet,
+				vmSpec:     &vmSpecification{VMs: []vm{vm0, vm1}},
+				testRuns:   []testRun{testRun1VM, testRun2VM},
+				startVM:    5,
+				nrVMs:      2,
+				firstV4Net: baseNet,
 			},
 			sequence: []step{
 				{
@@ -69,12 +69,12 @@ func TestChooseNextAction(t *testing.T) {
 		{
 			name: "test-fail",
 			suiteRun: testSuiteRun{
-				vmSpec:   &vmSpecification{VMs: []vm{vm0, vm1}},
-				testRuns: []testRun{testRun1VM, testRun2VM},
-				startVM:  5,
-				nrVMs:    2,
-				failTest: true,
-				firstNet: baseNet,
+				vmSpec:     &vmSpecification{VMs: []vm{vm0, vm1}},
+				testRuns:   []testRun{testRun1VM, testRun2VM},
+				startVM:    5,
+				nrVMs:      2,
+				failTest:   true,
+				firstV4Net: baseNet,
 			},
 			sequence: []step{
 				{
@@ -93,11 +93,11 @@ func TestChooseNextAction(t *testing.T) {
 		{
 			name: "provision",
 			suiteRun: testSuiteRun{
-				vmSpec:   &vmSpecification{ProvisionFile: "/p", VMs: []vm{vm0, vm1}},
-				testRuns: []testRun{testRun1VM, testRun2VM},
-				startVM:  5,
-				nrVMs:    2,
-				firstNet: baseNet,
+				vmSpec:     &vmSpecification{ProvisionFile: "/p", VMs: []vm{vm0, vm1}},
+				testRuns:   []testRun{testRun1VM, testRun2VM},
+				startVM:    5,
+				nrVMs:      2,
+				firstV4Net: baseNet,
 			},
 			sequence: []step{
 				{
@@ -131,11 +131,11 @@ func TestChooseNextAction(t *testing.T) {
 		{
 			name: "provision-fail",
 			suiteRun: testSuiteRun{
-				vmSpec:   &vmSpecification{ProvisionFile: "/p", VMs: []vm{vm0, vm1}},
-				testRuns: []testRun{testRun1VM, testRun2VM},
-				startVM:  5,
-				nrVMs:    2,
-				firstNet: baseNet,
+				vmSpec:     &vmSpecification{ProvisionFile: "/p", VMs: []vm{vm0, vm1}},
+				testRuns:   []testRun{testRun1VM, testRun2VM},
+				startVM:    5,
+				nrVMs:      2,
+				firstV4Net: baseNet,
 			},
 			sequence: []step{
 				{
@@ -265,5 +265,5 @@ func validateAction(t *testing.T, a, e action) {
 }
 
 func accessNetworkAction(name string) action {
-	return &addNetworkAction{networkName: name, network: accessNetwork()}
+	return &addNetworkAction{networkName: name, network: accessNetwork(false)}
 }

@@ -7,34 +7,48 @@ import (
 )
 
 type networkList struct {
-	current  *net.IPNet
-	freeNets map[string]bool
+	currentV4 *net.IPNet
+	currentV6 *net.IPNet
+	freeNets  map[string]bool
 }
 
-func NewNetworkList(current *net.IPNet) *networkList {
+func NewNetworkList(currentV4, currentV6 *net.IPNet) *networkList {
 	return &networkList{
-		current:  current,
-		freeNets: make(map[string]bool),
+		currentV4: currentV4,
+		currentV6: currentV6,
+		freeNets:  make(map[string]bool),
 	}
 }
 
-func (n *networkList) ReserveNext() *net.IPNet {
+func (n *networkList) ReserveNext(ipv6 bool) *net.IPNet {
 	for k, v := range n.freeNets {
-		if v {
+		ipNet := mustParse(k)
+		isIPv6 := ipNet.IP.To4() == nil
+
+		if v && isIPv6 == ipv6 {
 			n.freeNets[k] = false
-			return mustParse(k)
+			return ipNet
 		}
 	}
 
-	candidate := n.current
+	candidate := n.currentV4
+	if ipv6 {
+		candidate = n.currentV6
+	}
 
-	next, exceed := cidr.NextSubnet(n.current, len(n.current.IP)*8-8)
+	prefix, _ := candidate.Mask.Size()
+	next, exceed := cidr.NextSubnet(candidate, prefix)
 	if exceed {
 		panic("available subnets exhausted")
 	}
 
-	n.freeNets[n.current.String()] = false
-	n.current = next
+	n.freeNets[candidate.String()] = false
+	if ipv6 {
+		n.currentV6 = next
+	} else {
+		n.currentV4 = next
+	}
+
 	return candidate
 }
 

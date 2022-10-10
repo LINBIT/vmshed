@@ -88,7 +88,7 @@ func runScheduler(ctx context.Context, suiteRun *testSuiteRun) map[string]testRe
 }
 
 func initializeState(suiteRun *testSuiteRun) *suiteState {
-	netlist := NewNetworkList(suiteRun.firstNet)
+	netlist := NewNetworkList(suiteRun.firstV4Net, suiteRun.firstV6Net)
 
 	state := suiteState{
 		networks:   make(map[string]*networkState),
@@ -272,7 +272,7 @@ func allImagesReady(state *suiteState, run *testRun) bool {
 }
 
 func allNetworksReady(state *suiteState, run *testRun) bool {
-	networkName := findReadyNetwork(state, nil, accessNetwork(), true)
+	networkName := findReadyNetwork(state, nil, accessNetwork(run.variant.IPv6), true)
 	if networkName == "" {
 		return false
 	}
@@ -320,7 +320,8 @@ func findReadyNetwork(state *suiteState, exclude map[string]bool, network virter
 
 		if ns.network.ForwardMode != network.ForwardMode ||
 			ns.network.DHCP != network.DHCP ||
-			ns.network.Domain != network.Domain {
+			ns.network.Domain != network.Domain ||
+			ns.network.IPv6 != network.IPv6 {
 			continue
 		}
 
@@ -354,7 +355,7 @@ func nextActionRun(suiteRun *testSuiteRun, state *suiteState, run *testRun) acti
 		return nil
 	}
 
-	network := accessNetwork()
+	network := accessNetwork(run.variant.IPv6)
 	networkName := findReadyNetwork(state, nil, network, true)
 	if networkName == "" {
 		return makeAddNetworkAction(state, network, true)
@@ -388,7 +389,7 @@ func getIDs(suiteRun *testSuiteRun, state *suiteState, n int) []int {
 }
 
 func nextActionProvision(suiteRun *testSuiteRun, state *suiteState, v *vm) action {
-	network := accessNetwork()
+	network := accessNetwork(false)
 	networkName := findReadyNetwork(state, nil, network, true)
 	if networkName == "" {
 		return makeAddNetworkAction(state, network, true)
@@ -512,7 +513,8 @@ type addNetworkAction struct {
 	networkName string
 	network     virterNet
 	access      bool
-	ipNet       *net.IPNet
+	ipv4Net     *net.IPNet
+	ipv6Net     *net.IPNet
 	err         error
 }
 
@@ -527,7 +529,10 @@ func (a *addNetworkAction) updatePre(state *suiteState) {
 		stage:    networkAdd,
 	}
 	if a.network.DHCP {
-		a.ipNet = state.freeNets.ReserveNext()
+		a.ipv4Net = state.freeNets.ReserveNext(false)
+		if a.network.IPv6 {
+			a.ipv6Net = state.freeNets.ReserveNext(true)
+		}
 	}
 }
 
@@ -536,7 +541,7 @@ func (a *addNetworkAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
 	if a.access {
 		dhcpCount = suiteRun.nrVMs
 	}
-	a.err = addNetwork(ctx, suiteRun.outDir, a.networkName, a.network, a.ipNet, suiteRun.startVM, dhcpCount)
+	a.err = addNetwork(ctx, suiteRun.outDir, a.networkName, a.network, a.ipv4Net, a.ipv6Net, suiteRun.startVM, dhcpCount)
 }
 
 func (a *addNetworkAction) updatePost(state *suiteState) {

@@ -69,11 +69,13 @@ type testSpecification struct {
 type variant struct {
 	Name      string            `toml:"name"`
 	Variables map[string]string `toml:"variables"`
+	IPv6      bool              `toml:"ipv6"`
 	VMTags    []string          `toml:"vm_tags"`
 }
 
 type virterNet struct {
 	ForwardMode string `toml:"forward"`
+	IPv6        bool   `toml:"ipv6"`
 	DHCP        bool   `toml:"dhcp"`
 	Domain      string `toml:"domain"`
 }
@@ -86,7 +88,8 @@ type testSuiteRun struct {
 	testRuns          []testRun
 	startVM           int
 	nrVMs             int
-	firstNet          *net.IPNet
+	firstV4Net        *net.IPNet
+	firstV6Net        *net.IPNet
 	failTest          bool
 	printErrorDetails bool
 }
@@ -126,7 +129,8 @@ func rootCommand() *cobra.Command {
 	var version bool
 	var variantsToRun []string
 	var errorDetails bool
-	var firstSubnet string
+	var firstv4Subnet string
+	var firstv6Subnet string
 
 	rootCmd := &cobra.Command{
 		Use:   "vmshed",
@@ -192,7 +196,12 @@ current user.`,
 				log.Fatal(err)
 			}
 
-			_, firstNet, err := net.ParseCIDR(firstSubnet)
+			_, firstV4Net, err := net.ParseCIDR(firstv4Subnet)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			_, firstV6Net, err := net.ParseCIDR(firstv6Subnet)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -202,7 +211,8 @@ current user.`,
 			suiteRun.nrVMs = nrVMs
 			suiteRun.failTest = failTest
 			suiteRun.printErrorDetails = errorDetails
-			suiteRun.firstNet = firstNet
+			suiteRun.firstV4Net = firstV4Net
+			suiteRun.firstV6Net = firstV6Net
 
 			ctx, cancel := signalcontext.On(unix.SIGINT, unix.SIGTERM)
 			defer cancel()
@@ -240,8 +250,8 @@ current user.`,
 	rootCmd.Flags().Int64VarP(&randomSeed, "seed", "", 0, "The random number generator seed to use. Specifying 0 seeds with the current time (the default)")
 	rootCmd.Flags().StringSliceVarP(&variantsToRun, "variant", "", []string{}, "which variant to run (defaults to all)")
 	rootCmd.Flags().BoolVarP(&errorDetails, "error-details", "", true, "Show all test error logs at the end of the run")
-	rootCmd.Flags().StringVarP(&firstSubnet, "first-subnet", "", "10.224.0.0/24", "The first subnet to use for VMs. If more virtual networks are required, the next higher /24 networks will be used")
-
+	rootCmd.Flags().StringVarP(&firstv4Subnet, "first-subnet", "", "10.224.0.0/24", "The first subnet to use for VMs. If more virtual networks are required, the next higher network of the same size will be used")
+	rootCmd.Flags().StringVarP(&firstv6Subnet, "first-v6-subnet", "", "fd62:a80c:412::/64", "The first ipv6 subnet to use for VMs. If more virtual networks are required, the next higher network of the same size will be used")
 	return rootCmd
 }
 

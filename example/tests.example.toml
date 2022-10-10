@@ -12,6 +12,11 @@ name = "maria"
 variables = {dbtype = "mariadb"}
 vm_tags = ["mariadb-server"]
 
+[[variants]]
+name = "ipv6"
+variables = {dbtype = "mariadb"}
+ipv6 = true
+
 [tests]
 [tests.test_podman]
 vms = [2]
