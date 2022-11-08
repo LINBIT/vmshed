@@ -40,6 +40,7 @@ const (
 	StatusCanceled      TestStatus = "CANCELED"
 	StatusFailedTimeout TestStatus = "FAILED(TO)"
 	StatusFailed        TestStatus = "FAILED"
+	StatusError         TestStatus = "ERROR" // Error running test
 )
 
 type TestResulter interface {
@@ -169,7 +170,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	err := startVMs(ctx, logger, run, testnodes...)
 	defer shutdownVMs(logger, run.outDir, testnodes...)
 	if err != nil {
-		res.status = StatusSkipped
+		res.status = StatusError
 		res.err = fmt.Errorf("failed to start VMs: %w", err)
 		return res
 	}
