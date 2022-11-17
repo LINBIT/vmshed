@@ -92,6 +92,7 @@ type testSuiteRun struct {
 	firstV6Net        *net.IPNet
 	failTest          bool
 	printErrorDetails bool
+	logFormatVirter   string
 }
 
 type testConfig struct {
@@ -125,6 +126,7 @@ func rootCommand() *cobra.Command {
 	var nrVMs int
 	var failTest bool
 	var quiet bool
+	var logFormatVirter string
 	var outDir string
 	var version bool
 	var variantsToRun []string
@@ -213,6 +215,7 @@ current user.`,
 			suiteRun.printErrorDetails = errorDetails
 			suiteRun.firstV4Net = firstV4Net
 			suiteRun.firstV6Net = firstV6Net
+			suiteRun.logFormatVirter = logFormatVirter
 
 			ctx, cancel := signalcontext.On(unix.SIGINT, unix.SIGTERM)
 			defer cancel()
@@ -245,6 +248,7 @@ current user.`,
 	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm")
 	rootCmd.Flags().BoolVarP(&failTest, "failtest", "", false, "Stop executing tests when the first one failed")
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "", false, "Don't print progess messages while tests are running")
+	rootCmd.Flags().StringVar(&logFormatVirter, "virter-log-format", "", "Log format that is passed to virter on vm exec")
 	rootCmd.Flags().StringVarP(&outDir, "out-dir", "", "tests-out", "Directory for test results and logs")
 	rootCmd.Flags().BoolVarP(&version, "version", "", false, "Print version and exit")
 	rootCmd.Flags().Int64VarP(&randomSeed, "seed", "", 0, "The random number generator seed to use. Specifying 0 seeds with the current time (the default)")

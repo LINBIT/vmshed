@@ -179,10 +179,15 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	testNameEnv := fmt.Sprintf("env.TEST_NAME=%s", run.testName)
 	outDirValue := fmt.Sprintf("values.OutDir=%s", run.outDir)
 
-	argv := []string{"virter", "vm", "exec",
+	argv := []string{"virter"}
+	if suiteRun.logFormatVirter != "" {
+		argv = append(argv, "--logformat", suiteRun.logFormatVirter)
+	}
+	argv = append(argv,
+		"vm", "exec",
 		"--provision", suiteRun.testSpec.TestSuiteFile,
 		"--set", testNameEnv,
-		"--set", outDirValue}
+		"--set", outDirValue)
 	for _, override := range suiteRun.overrides {
 		argv = append(argv, "--set", override)
 	}
