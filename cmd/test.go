@@ -132,6 +132,11 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 		fmt.Fprintf(&report, "| ** %s\n", artifactsUrl)
 	}
 
+	logViewerUrl := getLogViewUrl(run.testID)
+	if logViewerUrl != "" {
+		fmt.Fprintf(&report, "| ** %s\n", logViewerUrl)
+	}
+
 	fmt.Fprintln(&report, "|===================================================================================================")
 	logLines := strings.Split(strings.TrimSpace(testRes.log.String()), "\n")
 	for _, line := range logLines {
@@ -279,4 +284,23 @@ func getArtifactsUrl(outdir string) string {
 	}
 
 	return fmt.Sprintf("%s/artifacts/browse/%s", jobURL, relOut)
+}
+
+func getLogViewUrl(testID string) string {
+	logViewURL := os.Getenv("LINBIT_LOG_VIEWER_URL")
+	if logViewURL == "" {
+		return ""
+	}
+
+	projectID := os.Getenv("CI_PROJECT_ID")
+	if projectID == "" {
+		return ""
+	}
+
+	jobURL := os.Getenv("CI_JOB_ID")
+	if jobURL == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("%s/projects/%s/jobs/%s/tests/%s", logViewURL, projectID, jobURL, testID)
 }
