@@ -332,6 +332,12 @@ func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int
 		log.Infof("| %-11s: %-73s : %9s", status, testRun.testID, tduration.Round(time.Second))
 	}
 	log.Infoln("|===================================================================================================")
+	logViewer := getLogViewUrl("")
+	if logViewer != "" {
+		log.Infof("| ** Logs: %s", logViewer)
+		log.Infoln("|===================================================================================================")
+	}
+
 	return exitCode
 }
 

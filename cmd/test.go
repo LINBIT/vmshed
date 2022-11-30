@@ -302,5 +302,9 @@ func getLogViewUrl(testID string) string {
 		return ""
 	}
 
-	return fmt.Sprintf("%s/projects/%s/jobs/%s/tests/%s", logViewURL, projectID, jobURL, testID)
+	if testID == "" {
+		return fmt.Sprintf("%s/projects/%s/jobs/%s", logViewURL, projectID, jobURL)
+	} else {
+		return fmt.Sprintf("%s/projects/%s/jobs/%s/tests/%s", logViewURL, projectID, jobURL, testID)
+	}
 }
