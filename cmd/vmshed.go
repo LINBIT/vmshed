@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"sort"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/sethvargo/go-signalcontext"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
@@ -217,7 +217,7 @@ current user.`,
 			suiteRun.firstV6Net = firstV6Net
 			suiteRun.logFormatVirter = logFormatVirter
 
-			ctx, cancel := signalcontext.On(unix.SIGINT, unix.SIGTERM)
+			ctx, cancel := signal.NotifyContext(context.Background(), unix.SIGINT, unix.SIGTERM)
 			defer cancel()
 			start := time.Now()
 
