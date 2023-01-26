@@ -229,8 +229,10 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 			tgtPath := filepath.Join(run.outDir, vm.vmName(), filepath.Dir(directory))
 			os.MkdirAll(tgtPath, 0755)
 			if err := copyDir(logger, vm, run.outDir, directory, tgtPath); err != nil {
-				logger.Infof("ARTIFACTCOPY: FAILED copy artifact directory %s: %s", directory, err.Error())
-				dumpStderr(logger, err)
+				logger.Debugf("ARTIFACTCOPY: FAILED copy artifact directory %s: %s", directory, err.Error())
+				if logger.IsLevelEnabled(log.DebugLevel) {
+					dumpStderr(logger, err)
+				}
 			}
 		}
 	}
