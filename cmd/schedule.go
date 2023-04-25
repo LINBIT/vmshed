@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"text/template"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -44,6 +45,7 @@ const (
 
 type suiteState struct {
 	networks   map[string]*networkState
+	baseImage  map[string]imageStage
 	imageStage map[string]imageStage
 	runStage   map[string]runStage
 	runResults map[string]testResult
@@ -92,6 +94,7 @@ func initializeState(suiteRun *testSuiteRun) *suiteState {
 
 	state := suiteState{
 		networks:   make(map[string]*networkState),
+		baseImage:  make(map[string]imageStage),
 		imageStage: make(map[string]imageStage),
 		runStage:   make(map[string]runStage),
 		runResults: make(map[string]testResult),
@@ -102,11 +105,18 @@ func initializeState(suiteRun *testSuiteRun) *suiteState {
 		state.runStage[run.testID] = runNew
 	}
 
+	initialBaseImageState := imageReady
+	if suiteRun.pullImageTemplate != nil {
+		initialBaseImageState = imageNone
+	}
+
 	initialImageStage := imageReady
 	if suiteRun.vmSpec.ProvisionFile != "" {
 		initialImageStage = imageNone
 	}
 	for _, v := range suiteRun.vmSpec.VMs {
+		state.baseImage[v.BaseImage] = initialBaseImageState
+
 		state.imageStage[v.ID()] = initialImageStage
 	}
 
@@ -185,6 +195,10 @@ func runStopping(suiteRun *testSuiteRun, state *suiteState) bool {
 	}
 
 	for _, v := range suiteRun.vmSpec.VMs {
+		if state.baseImage[v.BaseImage] == imageError {
+			return true
+		}
+
 		if state.imageStage[v.ID()] == imageError {
 			return true
 		}
@@ -227,7 +241,7 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 	}
 
 	for i, v := range suiteRun.vmSpec.VMs {
-		if state.imageStage[v.ID()] == imageNone {
+		if state.baseImage[v.BaseImage] == imageNone || state.imageStage[v.ID()] == imageNone {
 			return nextActionProvision(suiteRun, state, &suiteRun.vmSpec.VMs[i])
 		}
 	}
@@ -264,6 +278,10 @@ func runBetter(state *suiteState, a *testRun, b testRun) bool {
 
 func allImagesReady(state *suiteState, run *testRun) bool {
 	for _, v := range run.vms {
+		if state.baseImage[v.BaseImage] != imageReady {
+			return false
+		}
+
 		if state.imageStage[v.ID()] != imageReady {
 			return false
 		}
@@ -389,6 +407,14 @@ func getIDs(suiteRun *testSuiteRun, state *suiteState, n int) []int {
 }
 
 func nextActionProvision(suiteRun *testSuiteRun, state *suiteState, v *vm) action {
+	if state.baseImage[v.BaseImage] == imageNone {
+		return &pullImageAction{Image: v.BaseImage, PullTemplate: suiteRun.pullImageTemplate}
+	}
+
+	if state.baseImage[v.BaseImage] != imageReady {
+		return nil
+	}
+
 	network := accessNetwork(false)
 	networkName := findReadyNetwork(state, nil, network, true)
 	if networkName == "" {
@@ -472,6 +498,33 @@ func (a *performTestAction) updatePost(state *suiteState) {
 	}
 	for _, id := range a.ids {
 		state.freeIDs[id] = true
+	}
+}
+
+type pullImageAction struct {
+	Image        string
+	PullTemplate *template.Template
+	err          error
+}
+
+func (b *pullImageAction) name() string {
+	return fmt.Sprintf("Pull base image '%s'", b.Image)
+}
+
+func (b *pullImageAction) updatePre(state *suiteState) {
+	state.baseImage[b.Image] = imageProvision
+}
+
+func (b *pullImageAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
+	b.err = pullImage(ctx, suiteRun, b.Image, b.PullTemplate)
+}
+
+func (b *pullImageAction) updatePost(state *suiteState) {
+	if b.err == nil {
+		state.baseImage[b.Image] = imageReady
+	} else {
+		state.baseImage[b.Image] = imageError
+		state.errors = append(state.errors, fmt.Errorf("pull image %s: %w", b.Image, b.err))
 	}
 }
 

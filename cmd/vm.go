@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -50,6 +51,37 @@ func (vm vmInstance) vmName() string {
 
 func testIDString(test string, vmCount int, variantName string, testIndex int) string {
 	return fmt.Sprintf("%s-%d-%s-%d", test, vmCount, variantName, testIndex)
+}
+
+func pullImage(ctx context.Context, suiteRun *testSuiteRun, image string, templ *template.Template) error {
+	logger := log.WithFields(log.Fields{
+		"Action": "Pull",
+		"Image":  image,
+	})
+
+	errPath := filepath.Join(suiteRun.outDir, "provision-log", fmt.Sprintf("%s-pull.log", image))
+	argv := []string{"virter", "image", "pull", image}
+
+	if templ != nil {
+		var buf strings.Builder
+		err := templ.Execute(&buf, map[string]string{
+			"Image": image,
+		})
+		if err != nil {
+			return err
+		}
+
+		argv = append(argv, buf.String())
+	}
+
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+
+	log.Debugf("EXECUTING: %s", argv)
+	start := time.Now()
+	err := cmdStderrTerm(ctx, logger, errPath, cmd)
+	log.Debugf("EXECUTIONTIME: Pull image %s: %v", image, time.Since(start))
+
+	return err
 }
 
 func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, networkName string) error {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -93,6 +94,7 @@ type testSuiteRun struct {
 	failTest          bool
 	printErrorDetails bool
 	logFormatVirter   string
+	pullImageTemplate *template.Template
 }
 
 type testConfig struct {
@@ -101,6 +103,32 @@ type testConfig struct {
 	testName   string
 	test       test
 	repeats    int
+}
+
+type TemplateFlag struct {
+	*template.Template
+}
+
+func (t *TemplateFlag) String() string {
+	if t.Template != nil {
+		return t.Template.Tree.Root.String()
+	} else {
+		return ""
+	}
+}
+
+func (t *TemplateFlag) Set(s string) error {
+	parsed, err := template.New("image").Parse(s)
+	if err != nil {
+		return err
+	}
+
+	t.Template = parsed
+	return nil
+}
+
+func (t *TemplateFlag) Type() string {
+	return "template"
 }
 
 // Execute runs vmshed
@@ -133,6 +161,7 @@ func rootCommand() *cobra.Command {
 	var errorDetails bool
 	var firstv4Subnet string
 	var firstv6Subnet string
+	var pullImageTemplate TemplateFlag
 
 	rootCmd := &cobra.Command{
 		Use:   "vmshed",
@@ -216,6 +245,7 @@ current user.`,
 			suiteRun.firstV4Net = firstV4Net
 			suiteRun.firstV6Net = firstV6Net
 			suiteRun.logFormatVirter = logFormatVirter
+			suiteRun.pullImageTemplate = pullImageTemplate.Template
 
 			ctx, cancel := signal.NotifyContext(context.Background(), unix.SIGINT, unix.SIGTERM)
 			defer cancel()
@@ -256,6 +286,7 @@ current user.`,
 	rootCmd.Flags().BoolVarP(&errorDetails, "error-details", "", true, "Show all test error logs at the end of the run")
 	rootCmd.Flags().StringVarP(&firstv4Subnet, "first-subnet", "", "10.224.0.0/24", "The first subnet to use for VMs. If more virtual networks are required, the next higher network of the same size will be used")
 	rootCmd.Flags().StringVarP(&firstv6Subnet, "first-v6-subnet", "", "fd62:a80c:412::/64", "The first ipv6 subnet to use for VMs. If more virtual networks are required, the next higher network of the same size will be used")
+	rootCmd.Flags().VarP(&pullImageTemplate, "pull-template", "", "Where to pull the base images from. Accepts a go template string, allowing usage like 'registry.example.com/vm/{{ .Image }}:latest'")
 	return rootCmd
 }
 
