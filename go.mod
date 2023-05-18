@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/BurntSushi/toml v1.2.1
 	github.com/apparentlymart/go-cidr v1.1.0
-	github.com/sirupsen/logrus v1.9.1
+	github.com/sirupsen/logrus v1.9.2
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.2
 	golang.org/x/sys v0.8.0
