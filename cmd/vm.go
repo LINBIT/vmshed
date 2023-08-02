@@ -248,7 +248,13 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 	return cmdStderrTerm(ctx, logger, stderrPath, cmd)
 }
 
-func shutdownVMs(logger *log.Logger, outDir string, testnodes ...vmInstance) {
+func shutdownVMs(logger *log.Logger, outDir string, res *testResult, suiteRun *testSuiteRun, testnodes ...vmInstance) {
+	if res.status == StatusFailed && suiteRun.onFailure == OnFailureKeepVms {
+		logger.Warn("Test failed, leaving virtual machines in place")
+		logger.Info("Use \"virter vm rm ...\" when done with the VMs")
+		return
+	}
+
 	vmNames := make([]string, 0, len(testnodes))
 
 	for _, vm := range testnodes {

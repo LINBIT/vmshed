@@ -175,6 +175,11 @@ func scheduleLoop(ctx context.Context, suiteRun *testSuiteRun, state *suiteState
 }
 
 func tearDown(suiteRun *testSuiteRun, state *suiteState) {
+	if len(state.errors) > 0 && suiteRun.onFailure == OnFailureKeepVms {
+		log.Warn("There were errors, not removing network")
+		log.Info("Use \"virter network rm ...\" to remove networks when done")
+		return
+	}
 	for networkName := range state.networks {
 		err := removeNetwork(suiteRun.outDir, networkName)
 		if err != nil {
@@ -184,7 +189,7 @@ func tearDown(suiteRun *testSuiteRun, state *suiteState) {
 }
 
 func runStopping(suiteRun *testSuiteRun, state *suiteState) bool {
-	if suiteRun.failTest && state.errors != nil {
+	if suiteRun.onFailure != OnFailureContinue && state.errors != nil {
 		return true
 	}
 

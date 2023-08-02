@@ -173,7 +173,7 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	// Start VMs
 	start := time.Now()
 	err := startVMs(ctx, logger, run, testnodes...)
-	defer shutdownVMs(logger, run.outDir, testnodes...)
+	defer shutdownVMs(logger, run.outDir, &res, suiteRun, testnodes...)
 	if err != nil {
 		res.status = StatusError
 		res.err = fmt.Errorf("failed to start VMs: %w", err)

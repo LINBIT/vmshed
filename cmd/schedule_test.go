@@ -73,7 +73,7 @@ func TestChooseNextAction(t *testing.T) {
 				testRuns:   []testRun{testRun1VM, testRun2VM},
 				startVM:    5,
 				nrVMs:      2,
-				failTest:   true,
+				onFailure:  "terminate",
 				firstV4Net: baseNet,
 			},
 			sequence: []step{

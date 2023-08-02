@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -81,6 +82,14 @@ type virterNet struct {
 	Domain      string `toml:"domain"`
 }
 
+type FailurePolicy string
+
+const (
+	OnFailureContinue  FailurePolicy = "continue"
+	OnFailureTerminate FailurePolicy = "terminate"
+	OnFailureKeepVms   FailurePolicy = "keep-vms"
+)
+
 type testSuiteRun struct {
 	vmSpec            *vmSpecification
 	testSpec          *testSpecification
@@ -91,10 +100,28 @@ type testSuiteRun struct {
 	nrVMs             int
 	firstV4Net        *net.IPNet
 	firstV6Net        *net.IPNet
-	failTest          bool
+	onFailure         FailurePolicy
 	printErrorDetails bool
 	logFormatVirter   string
 	pullImageTemplate *template.Template
+}
+
+func (f *FailurePolicy) String() string {
+	return string(*f)
+}
+
+func (f *FailurePolicy) Set(v string) error {
+	switch v {
+	case "continue", "terminate", "keep-vms":
+		*f = FailurePolicy(v)
+		return nil
+	default:
+		return errors.New("should be one out of \"continue\" \"terminate\" \"keep-vms\"")
+	}
+}
+
+func (f *FailurePolicy) Type() string {
+	return "FailurePolicy"
 }
 
 type testConfig struct {
@@ -152,7 +179,7 @@ func rootCommand() *cobra.Command {
 	var repeats int
 	var startVM int
 	var nrVMs int
-	var failTest bool
+	var onFailure FailurePolicy = OnFailureContinue
 	var quiet bool
 	var logFormatVirter string
 	var outDir string
@@ -240,7 +267,7 @@ current user.`,
 			suiteRun.overrides = provisionOverrides
 			suiteRun.startVM = startVM
 			suiteRun.nrVMs = nrVMs
-			suiteRun.failTest = failTest
+			suiteRun.onFailure = onFailure
 			suiteRun.printErrorDetails = errorDetails
 			suiteRun.firstV4Net = firstV4Net
 			suiteRun.firstV6Net = firstV6Net
@@ -276,7 +303,7 @@ current user.`,
 	rootCmd.Flags().IntVarP(&repeats, "repeats", "", 1, "number of times to repeat each test, expecting success on every attempt")
 	rootCmd.Flags().IntVarP(&startVM, "startvm", "", 2, "Number of the first VM to start in parallel")
 	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm")
-	rootCmd.Flags().BoolVarP(&failTest, "failtest", "", false, "Stop executing tests when the first one failed")
+	rootCmd.Flags().VarP(&onFailure, "on-failure", "", "What to do if a test fails: continue|terminate|keep-vms")
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "", false, "Don't print progess messages while tests are running")
 	rootCmd.Flags().StringVar(&logFormatVirter, "virter-log-format", "", "Log format that is passed to virter on vm exec")
 	rootCmd.Flags().StringVarP(&outDir, "out-dir", "", "tests-out", "Directory for test results and logs")
