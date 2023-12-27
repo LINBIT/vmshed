@@ -78,7 +78,7 @@ func pullImage(ctx context.Context, suiteRun *testSuiteRun, image string, templ 
 
 	log.Debugf("EXECUTING: %s", argv)
 	start := time.Now()
-	err := cmdStderrTerm(ctx, logger, errPath, cmd)
+	err := cmdStderrTerm(ctx, logger, errPath, "", cmd)
 	log.Debugf("EXECUTIONTIME: Pull image %s: %v", image, time.Since(start))
 
 	return err
@@ -99,7 +99,7 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	log.Debugf("EXECUTING: %s", argv)
 	// this command is idempotent, so even if it does nothing, it returns zero
 	cmd := exec.Command(argv[0], argv[1:]...)
-	if err := cmdStderrTerm(ctx, logger, rmStderrPath, cmd); err != nil {
+	if err := cmdStderrTerm(ctx, logger, rmStderrPath, "", cmd); err != nil {
 		return err
 	}
 
@@ -135,6 +135,7 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	argv = append(argv, v.BaseImage, newImageName)
 
 	stderrPath := filepath.Join(outDir, fmt.Sprintf("%s-provision.log", newImageName))
+	metaPath := filepath.Join(outDir, fmt.Sprintf("%s-meta.json", newImageName))
 
 	cmd = exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv(networkName)
@@ -144,7 +145,7 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 
 	log.Debugf("EXECUTING: %s", argv)
 	start := time.Now()
-	err := cmdStderrTerm(provisionCtx, logger, stderrPath, cmd)
+	err := cmdStderrTerm(provisionCtx, logger, stderrPath, metaPath, cmd)
 	log.Debugf("EXECUTIONTIME: Provisioning image %s: %v", newImageName, time.Since(start))
 
 	if ctx.Err() != nil {
@@ -173,7 +174,7 @@ func removeImages(outDir string, vmSpec *vmSpecification) {
 		stderrPath := filepath.Join(provisionOutDir, fmt.Sprintf("image_rm_%s.log", newImageName))
 		log.Debugf("EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
-		if err := cmdStderrTerm(ctx, log.StandardLogger(), stderrPath, cmd); err != nil {
+		if err := cmdStderrTerm(ctx, log.StandardLogger(), stderrPath, "", cmd); err != nil {
 			log.Errorf("ERROR: Could not remove image %s %v", newImageName, err)
 			dumpStderr(log.StandardLogger(), err)
 			// do not return, keep going...
@@ -213,7 +214,7 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 	// this command is idempotent, so even if it does nothing, it returns zero
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
-	if err := cmdStderrTerm(ctx, logger, rmStderrPath, cmd); err != nil {
+	if err := cmdStderrTerm(ctx, logger, rmStderrPath, "", cmd); err != nil {
 		return err
 	}
 
@@ -245,7 +246,7 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 	logger.Debugf("EXECUTING: %s", argv)
 	cmd = exec.Command(argv[0], argv[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
-	return cmdStderrTerm(ctx, logger, stderrPath, cmd)
+	return cmdStderrTerm(ctx, logger, stderrPath, "", cmd)
 }
 
 func shutdownVMs(logger *log.Logger, outDir string, res *testResult, suiteRun *testSuiteRun, testnodes ...vmInstance) {
@@ -269,7 +270,7 @@ func shutdownVMs(logger *log.Logger, outDir string, res *testResult, suiteRun *t
 		logger.Debugf("EXECUTING: %s", argv)
 		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Env = virterEnv(vm.networkNames[0])
-		if err := cmdStderrTerm(ctx, logger, stderrPath, cmd); err != nil {
+		if err := cmdStderrTerm(ctx, logger, stderrPath, "", cmd); err != nil {
 			logger.Errorf("ERROR: Could not stop VM %s: %v", vmName, err)
 			dumpStderr(logger, err)
 			// do not return, keep going...

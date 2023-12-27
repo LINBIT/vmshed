@@ -261,7 +261,7 @@ func copyDir(logger log.FieldLogger, vm vmInstance, logDir string, srcDir string
 	logger.Debugf("EXECUTING VIRTER COPY: %s", args)
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = virterEnv(vm.networkNames[0])
-	return cmdStderrTerm(ctx, logger, stderrPath, cmd)
+	return cmdStderrTerm(ctx, logger, stderrPath, "", cmd)
 }
 
 func getArtifactsUrl(outdir string) string {

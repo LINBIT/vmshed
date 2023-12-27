@@ -46,7 +46,7 @@ func addNetwork(ctx context.Context, outDir string, networkName string, network 
 	stderrPath := filepath.Join(outDir, "network-log", fmt.Sprintf("network_add_%s.log", networkName))
 
 	log.Debugf("EXECUTING: %s", argv)
-	err := cmdStderrTerm(ctx, logger, stderrPath, exec.Command(argv[0], argv[1:]...))
+	err := cmdStderrTerm(ctx, logger, stderrPath, "", exec.Command(argv[0], argv[1:]...))
 	if err != nil {
 		log.WithError(err).Warnf("failed to create test network %s", networkName)
 		return err
@@ -67,7 +67,7 @@ func removeNetwork(outDir string, networkName string) error {
 	argv := []string{"virter", "network", "rm", networkName}
 	stderrPath := filepath.Join(outDir, "network-log", fmt.Sprintf("network_rm_%s.log", networkName))
 	log.Debugf("EXECUTING: %s", argv)
-	err := cmdStderrTerm(ctx, logger, stderrPath, exec.Command(argv[0], argv[1:]...))
+	err := cmdStderrTerm(ctx, logger, stderrPath, "", exec.Command(argv[0], argv[1:]...))
 	if err != nil {
 		logger.WithError(err).Warnf("failed to remove test network %s", networkName)
 		return err
