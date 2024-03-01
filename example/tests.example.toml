@@ -5,22 +5,21 @@ artifacts = [ "/etc/udev" ]
 [[variants]]
 # every variant needs a "name"
 name = "postgres"
-variables = {dbtype = "postgresql"}
+variables.dbtype = "postgresql"
 
 [[variants]]
 name = "maria"
-variables = {dbtype = "mariadb"}
+variables.dbtype = "mariadb"
 vm_tags = ["mariadb-server"]
 
 [[variants]]
 name = "ipv6"
-variables = {dbtype = "mariadb"}
+variables.dbtype = "mariadb"
 ipv6 = true
 
 [[networks]]
 domain = "second-net"
 
-[tests]
 [tests.test_podman]
 vms = [2]
 vm_tags = ["podman"]
@@ -28,8 +27,14 @@ vm_tags = ["podman"]
 [tests.test_generic]
 vms = [2]
 
+[tests.all_platforms]
+vms = [2]
+variants = ["postgres"]
+needallplatforms = true
+
 [tests.extra_networks]
 vms = [2]
+samevms = true
 [[tests.extra_networks.networks]]
 forward = "nat"
 dhcp = true

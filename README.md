@@ -24,6 +24,9 @@ line flags as described [here](doc/test-run-determination.md).
 The tests specification is a TOML file that is provided with the `--tests`
 flag. It defines what tests there are and how they are run.
 
+[Tests specification](./doc/tests-specification.md) describes the available
+keys.
+
 ### Test suite file
 
 The top level key `test_suite_file` in the tests specification references
