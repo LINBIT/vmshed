@@ -64,6 +64,7 @@ type testSpecification struct {
 	TestSuiteFile string          `toml:"test_suite_file"`
 	TestTimeout   duration        `toml:"test_timeout"`
 	Tests         map[string]test `toml:"tests"`
+	Networks      []virterNet     `toml:"networks"` // Extra NIC to add to the VMs for all tests
 	Artifacts     []string        `toml:"artifacts"`
 	Variants      []variant       `toml:"variants"`
 }
@@ -130,6 +131,7 @@ type testConfig struct {
 	testName   string
 	test       test
 	repeats    int
+	networks   []virterNet // includes networks configured for all tests as well as for this test specifically
 }
 
 type TemplateFlag struct {
@@ -434,6 +436,7 @@ func determineAllTestRuns(
 			testName:   testName,
 			test:       test,
 			repeats:    repeats,
+			networks:   append(testSpec.Networks, test.Networks...),
 		}
 		runs, err := determineRunsForTest(randomGenerator, &config, testSpec.Variants)
 		if err != nil {
@@ -555,7 +558,7 @@ func newTestRun(config *testConfig, variant variant, vms []vm, testIndex int) te
 		testID:   testID,
 		outDir:   filepath.Join(config.testLogDir, testID),
 		vms:      vms,
-		networks: config.test.Networks,
+		networks: config.networks,
 		variant:  variant,
 	}
 

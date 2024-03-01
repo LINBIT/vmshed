@@ -17,6 +17,9 @@ name = "ipv6"
 variables = {dbtype = "mariadb"}
 ipv6 = true
 
+[[networks]]
+domain = "second-net"
+
 [tests]
 [tests.test_podman]
 vms = [2]
@@ -30,4 +33,4 @@ vms = [2]
 [[tests.extra_networks.networks]]
 forward = "nat"
 dhcp = true
-domain = "second-net"
+domain = "third-net"
