@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"math/rand"
 	"testing"
 	"time"
 
@@ -248,6 +249,7 @@ func TestDeterminedTests(t *testing.T) {
 			testSpec.TestTimeout = durationDefault(testSpec.TestTimeout, 5*time.Minute)
 
 			testSuiteRun, err := createTestSuiteRun(
+				rand.New(rand.NewSource(12345678)),
 				vmSpec, testSpec, test.toRun, "", test.repeats, test.variants)
 			if err != nil {
 				t.Fatal(err)

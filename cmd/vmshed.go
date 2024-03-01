@@ -224,7 +224,7 @@ current user.`,
 			}
 
 			log.Infof("Using random seed: %d", randomSeed)
-			rand.Seed(randomSeed)
+			randomGenerator := rand.New(rand.NewSource(randomSeed))
 
 			err := os.MkdirAll(outDir, 0755)
 			if err != nil {
@@ -249,7 +249,7 @@ current user.`,
 			testSpec.TestSuiteFile = joinIfRel(filepath.Dir(testSpecPath), testSpec.TestSuiteFile)
 			testSpec.TestTimeout = durationDefault(testSpec.TestTimeout, 5*time.Minute)
 
-			suiteRun, err := createTestSuiteRun(vmSpec, testSpec, toRun, outDir, repeats, variantsToRun)
+			suiteRun, err := createTestSuiteRun(randomGenerator, vmSpec, testSpec, toRun, outDir, repeats, variantsToRun)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -318,6 +318,7 @@ current user.`,
 }
 
 func createTestSuiteRun(
+	randomGenerator *rand.Rand,
 	vmSpec vmSpecification,
 	testSpec testSpecification,
 	toRun string,
@@ -336,7 +337,7 @@ func createTestSuiteRun(
 	testSpec.Variants = filterVariants(testSpec.Variants, variantsToRun)
 
 	testLogDir := filepath.Join(outDir, "log")
-	testRuns, err := determineAllTestRuns(testLogDir, &vmSpec, &testSpec, repeats)
+	testRuns, err := determineAllTestRuns(randomGenerator, testLogDir, &vmSpec, &testSpec, repeats)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -419,6 +420,7 @@ func filterVariants(variants []variant, variantsToRun []string) []variant {
 }
 
 func determineAllTestRuns(
+	randomGenerator *rand.Rand,
 	testLogDir string,
 	vmSpec *vmSpecification,
 	testSpec *testSpecification,
@@ -433,7 +435,7 @@ func determineAllTestRuns(
 			test:       test,
 			repeats:    repeats,
 		}
-		runs, err := determineRunsForTest(&config, testSpec.Variants)
+		runs, err := determineRunsForTest(randomGenerator, &config, testSpec.Variants)
 		if err != nil {
 			return nil, err
 		}
@@ -442,7 +444,7 @@ func determineAllTestRuns(
 	return testRuns, nil
 }
 
-func determineRunsForTest(config *testConfig, variants []variant) ([]testRun, error) {
+func determineRunsForTest(randomGenerator *rand.Rand, config *testConfig, variants []variant) ([]testRun, error) {
 	testRuns := []testRun{}
 
 	for _, variant := range variants {
@@ -459,7 +461,7 @@ func determineRunsForTest(config *testConfig, variants []variant) ([]testRun, er
 		}
 
 		for _, vmCount := range config.test.VMCount {
-			variantRuns, err := determineRunsForTestVariant(config, vmCount, variant, availableVMs)
+			variantRuns, err := determineRunsForTestVariant(randomGenerator, config, vmCount, variant, availableVMs)
 			if err != nil {
 				return []testRun{}, err
 			}
@@ -470,7 +472,7 @@ func determineRunsForTest(config *testConfig, variants []variant) ([]testRun, er
 	return testRuns, nil
 }
 
-func determineRunsForTestVariant(config *testConfig, vmCount int, testVariant variant, availableVMs []vm) ([]testRun, error) {
+func determineRunsForTestVariant(randomGenerator *rand.Rand, config *testConfig, vmCount int, testVariant variant, availableVMs []vm) ([]testRun, error) {
 	testRuns := []testRun{}
 
 	for repeatCounter := 0; repeatCounter < config.repeats; repeatCounter++ {
@@ -480,7 +482,7 @@ func determineRunsForTestVariant(config *testConfig, vmCount int, testVariant va
 					config, testVariant, repeatVM(v, vmCount), len(testRuns)))
 			}
 		} else if config.test.SameVMs {
-			v, err := randomVM(availableVMs)
+			v, err := randomVM(randomGenerator, availableVMs)
 			if err != nil {
 				return nil, err
 			}
@@ -489,7 +491,7 @@ func determineRunsForTestVariant(config *testConfig, vmCount int, testVariant va
 		} else {
 			var vms []vm
 			for i := 0; i < vmCount; i++ {
-				v, err := randomVM(availableVMs)
+				v, err := randomVM(randomGenerator, availableVMs)
 				if err != nil {
 					return nil, err
 				}
@@ -510,11 +512,11 @@ func repeatVM(v vm, count int) []vm {
 	return vms
 }
 
-func randomVM(vms []vm) (vm, error) {
+func randomVM(randomGenerator *rand.Rand, vms []vm) (vm, error) {
 	if len(vms) == 0 {
 		return vm{}, fmt.Errorf("Unable to randomly choose VM from empty array")
 	}
-	return vms[rand.Int63n(int64(len(vms)))], nil
+	return vms[randomGenerator.Int63n(int64(len(vms)))], nil
 }
 
 func containsString(s []string, e string) bool {

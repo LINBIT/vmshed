@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,7 +143,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	}
 
 	testLog := testRes.testLog.Bytes()
-	if err := ioutil.WriteFile(filepath.Join(run.outDir, "test.log"), testLog, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(run.outDir, "test.log"), testLog, 0644); err != nil {
 		fmt.Fprintf(&report, "| FAILED to write log; suppressing original error: %v\n", testRes.err)
 		testRes.err = err
 	}
@@ -156,7 +155,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 	}
 	fmt.Fprintln(&report, "|===================================================================================================")
 
-	if err := ioutil.WriteFile(filepath.Join(run.outDir, "report.log"), report.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(run.outDir, "report.log"), report.Bytes(), 0644); err != nil {
 		log.Errorf("Failed to write report; suppressing original error: %v\n", testRes.err)
 		testRes.err = err
 	}
