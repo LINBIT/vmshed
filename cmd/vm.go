@@ -74,7 +74,7 @@ func pullImage(ctx context.Context, suiteRun *testSuiteRun, image string, templ 
 		argv = append(argv, buf.String())
 	}
 
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := exec.Command(argv[0], argv[1:]...)
 
 	log.Debugf("EXECUTING: %s", argv)
 	start := time.Now()
