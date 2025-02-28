@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoadTestsToml(t *testing.T) {
@@ -239,7 +240,7 @@ func TestDeterminedTests(t *testing.T) {
 			}
 			vmSpec.ProvisionFile = joinIfRel("/tmp", vmSpec.ProvisionFile)
 			vmSpec.ProvisionTimeout = durationDefault(vmSpec.ProvisionTimeout, 3*time.Minute)
-			vmSpec.VMs = filterVMs(vmSpec.VMs, []string{})
+			vmSpec.VMs = filterVMs(vmSpec.VMs, []string{}, []string{})
 
 			var testSpec testSpecification
 			if _, err := toml.Decode(test.testSpec, &testSpec); err != nil {
@@ -279,6 +280,83 @@ func TestDeterminedTests(t *testing.T) {
 			if len(missingTests) > 0 {
 				t.Errorf("Expected following tests to schedule: %v", missingTests)
 			}
+		})
+	}
+}
+
+func TestFilterVMs(t *testing.T) {
+	vms := []vm{
+		{BaseImage: "rhel-9-drbd-k427"},
+		{BaseImage: "rhel-8-drbd-k477"},
+		{BaseImage: "rhel-7-drbd-k1160"},
+		{BaseImage: "ubuntu-focal-drbd-k190"},
+	}
+
+	cases := []struct {
+		name       string
+		baseImages []string
+		exclude    []string
+		want       []string
+	}{
+		{
+			name:       "default all",
+			baseImages: []string{},
+			exclude:    []string{},
+			want:       []string{"rhel-9-drbd-k427", "rhel-8-drbd-k477", "rhel-7-drbd-k1160", "ubuntu-focal-drbd-k190"},
+		},
+		{
+			name:       "include one",
+			baseImages: []string{"rhel-8-drbd-k477"},
+			exclude:    []string{},
+			want:       []string{"rhel-8-drbd-k477"},
+		},
+		{
+			name:       "exclude one",
+			baseImages: []string{},
+			exclude:    []string{"rhel-8-drbd-k477"},
+			want:       []string{"rhel-9-drbd-k427", "rhel-7-drbd-k1160", "ubuntu-focal-drbd-k190"},
+		},
+		{
+			name:       "exclude two",
+			baseImages: []string{},
+			exclude:    []string{"rhel-8-drbd-k477", "rhel-7-drbd-k1160"},
+			want:       []string{"rhel-9-drbd-k427", "ubuntu-focal-drbd-k190"},
+		},
+		{
+			name:       "include and exclude",
+			baseImages: []string{"rhel-8-drbd-k477", "ubuntu-focal-drbd-k190"},
+			exclude:    []string{"rhel-8-drbd-k477"},
+			want:       []string{"ubuntu-focal-drbd-k190"},
+		},
+		{
+			name:       "include and exclude all",
+			baseImages: []string{"rhel-8-drbd-k477", "ubuntu-focal-drbd-k190"},
+			exclude:    []string{"rhel-8-drbd-k477", "ubuntu-focal-drbd-k190"},
+			want:       []string{},
+		},
+		{
+			name:       "include non-existing",
+			baseImages: []string{"does-not-exist"},
+			exclude:    []string{},
+			want:       []string{},
+		},
+		{
+			name:       "exclude non-existing",
+			baseImages: []string{},
+			exclude:    []string{"does-not-exist"},
+			want:       []string{"rhel-9-drbd-k427", "rhel-8-drbd-k477", "rhel-7-drbd-k1160", "ubuntu-focal-drbd-k190"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			filtered := filterVMs(vms, c.baseImages, c.exclude)
+			got := make([]string, 0)
+			for _, vm := range filtered {
+				got = append(got, vm.BaseImage)
+			}
+
+			require.Equal(t, c.want, got)
 		})
 	}
 }

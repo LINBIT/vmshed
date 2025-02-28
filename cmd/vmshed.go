@@ -177,6 +177,7 @@ func rootCommand() *cobra.Command {
 	var randomSeed int64
 	var provisionOverrides []string
 	var baseImages []string
+	var excludeBaseImages []string
 	var toRun string
 	var repeats int
 	var startVM int
@@ -239,7 +240,7 @@ current user.`,
 			}
 			vmSpec.ProvisionFile = joinIfRel(filepath.Dir(vmSpecPath), vmSpec.ProvisionFile)
 			vmSpec.ProvisionTimeout = durationDefault(vmSpec.ProvisionTimeout, 3*time.Minute)
-			vmSpec.VMs = filterVMs(vmSpec.VMs, baseImages)
+			vmSpec.VMs = filterVMs(vmSpec.VMs, baseImages, excludeBaseImages)
 
 			var testSpec testSpecification
 			if _, err := toml.DecodeFile(testSpecPath, &testSpec); err != nil {
@@ -301,6 +302,7 @@ current user.`,
 	rootCmd.Flags().StringVarP(&testSpecPath, "tests", "", "tests.toml", "File containing test specification")
 	rootCmd.Flags().StringArrayVarP(&provisionOverrides, "set", "s", []string{}, "set/override provisioning steps, for example '--set values.X=y'")
 	rootCmd.Flags().StringSliceVarP(&baseImages, "base-image", "", []string{}, "VM base images to use (defaults to all)")
+	rootCmd.Flags().StringSliceVarP(&excludeBaseImages, "exclude-base-image", "", []string{}, "VM base images to exclude (defaults to none)")
 	rootCmd.Flags().StringVarP(&toRun, "torun", "", "all", "comma separated list of test names to execute ('all' is a reserved test name)")
 	rootCmd.Flags().IntVarP(&repeats, "repeats", "", 1, "number of times to repeat each test, expecting success on every attempt")
 	rootCmd.Flags().IntVarP(&startVM, "startvm", "", 2, "Number of the first VM to start in parallel")
@@ -591,17 +593,30 @@ func joinIfRel(basepath string, path string) string {
 	return filepath.Join(basepath, path)
 }
 
-func filterVMs(vms []vm, baseImages []string) []vm {
-	if len(baseImages) == 0 {
+// filterVMs filters the VMs based on the baseImages and exclude parameters.
+// If baseImages is empty, all VMs are included. If exclude is empty, no VMs are excluded.
+func filterVMs(vms []vm, baseImages []string, exclude []string) []vm {
+	if len(baseImages) == 0 && len(exclude) == 0 {
 		return vms
 	}
 
-	selected := []vm{}
+	selected := make([]vm, 0)
 	for _, vm := range vms {
 		found := false
 		for _, baseImage := range baseImages {
 			if vm.BaseImage == baseImage {
 				found = true
+			}
+		}
+
+		if len(baseImages) == 0 {
+			// default for empty baseImages is to include all
+			found = true
+		}
+
+		for _, excludeImage := range exclude {
+			if vm.BaseImage == excludeImage {
+				found = false
 			}
 		}
 
