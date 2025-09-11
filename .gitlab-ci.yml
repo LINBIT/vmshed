@@ -1,4 +1,4 @@
-image: golang:buster
+image: golang:1
 
 stages:
   - test
@@ -7,13 +7,17 @@ stages:
 test:
   stage: test
   cache:
+    key:
+      files:
+      - go.sum
     paths:
       - .mygo/pkg/mod
+  variables:
+    GOPATH: $CI_BUILDS_DIR/.mygo
   script:
-    - GOPATH=$(pwd)/.mygo go version
-    - GOPATH=$(pwd)/.mygo go install github.com/jstemmer/go-junit-report@latest
-    - GOPATH=$(pwd)/.mygo go test -v -coverprofile .testCoverage.txt ./... 2>&1 | $(pwd)/.mygo/bin/go-junit-report -set-exit-code > test.xml
-    - GOPATH=$(pwd)/.mygo go tool cover -func=.testCoverage.txt
+    - go version
+    - go test -v -coverprofile .testCoverage.txt ./... 2>&1 | go run github.com/jstemmer/go-junit-report@latest -set-exit-code > test.xml
+    - go tool cover -func=.testCoverage.txt
   artifacts:
     reports:
       junit: test.xml
@@ -21,10 +25,15 @@ test:
 build:
   stage: build
   cache:
+    key:
+      files:
+      - go.sum
     paths:
       - .mygo/pkg/mod
+  variables:
+    GOPATH: $CI_BUILDS_DIR/.mygo
   script:
-    - GOPATH=$(pwd)/.mygo make
+    - make
   artifacts:
     paths:
       - vmshed
