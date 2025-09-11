@@ -1,5 +1,10 @@
 image: golang:1
 
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_ID
+    - if: $CI_COMMIT_BRANCH == 'master'
+
 stages:
   - test
   - build
@@ -11,9 +16,9 @@ test:
       files:
       - go.sum
     paths:
-      - .mygo/pkg/mod
+      - .go/pkg/mod
   variables:
-    GOPATH: $CI_BUILDS_DIR/.mygo
+    GOPATH: $CI_PROJECT_DIR/.go
   script:
     - go version
     - go test -v -coverprofile .testCoverage.txt ./... 2>&1 | go run github.com/jstemmer/go-junit-report@latest -set-exit-code > test.xml
@@ -29,9 +34,9 @@ build:
       files:
       - go.sum
     paths:
-      - .mygo/pkg/mod
+      - .go/pkg/mod
   variables:
-    GOPATH: $CI_BUILDS_DIR/.mygo
+    GOPATH: $CI_PROJECT_DIR/.go
   script:
     - make
   artifacts:
