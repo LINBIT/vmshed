@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,21 +15,23 @@ import (
 )
 
 type test struct {
-	VMCount          []int       `toml:"vms"`
-	VMTags           []string    `toml:"vm_tags"`
-	SameVMs          bool        `toml:"samevms"`          // test need the same Distribution
-	NeedAllPlatforms bool        `toml:"needallplatforms"` // test need to run on all platforms
-	Variants         []string    `toml:"variants"`         // only run on given variants, if empty all
-	Networks         []virterNet `toml:"networks"`         // Extra NIC to add to the VMs
+	VMCount          []int             `toml:"vms"`
+	VMTags           []string          `toml:"vm_tags"`
+	SameVMs          bool              `toml:"samevms"`          // test need the same Distribution
+	NeedAllPlatforms bool              `toml:"needallplatforms"` // test need to run on all platforms
+	Variants         []string          `toml:"variants"`         // only run on given variants, if empty all
+	Networks         []virterNet       `toml:"networks"`         // Extra NIC to add to the VMs
+	Variables        map[string]string `toml:"variables"`        // overwrite variables from variants
 }
 
 type testRun struct {
-	testName string
-	testID   string
-	outDir   string
-	vms      []vm
-	networks []virterNet
-	variant  variant
+	testName  string
+	testID    string
+	outDir    string
+	vms       []vm
+	networks  []virterNet
+	variant   variant
+	variables map[string]string
 }
 
 type TestStatus string
@@ -195,8 +198,12 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	for _, override := range suiteRun.overrides {
 		argv = append(argv, "--set", override)
 	}
+	// merge variables test.variables have higher priority
+	merged_variables := map[string]string{}
+	maps.Copy(merged_variables, run.variant.Variables)
+	maps.Copy(merged_variables, run.variables)
 	// variant variables
-	for key, value := range run.variant.Variables {
+	for key, value := range merged_variables {
 		argv = append(argv, "--set", "values."+key+"="+value)
 	}
 	for _, vm := range testnodes {
