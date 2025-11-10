@@ -1,4 +1,4 @@
-image: golang:1
+image: docker.io/library/golang:1
 
 workflow:
   rules:
