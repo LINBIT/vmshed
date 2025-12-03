@@ -68,7 +68,7 @@ func saveResultsJSON(suiteRun testSuiteRun, startTime time.Time, results map[str
 func baseImageNames(vms []vm) []string {
 	names := []string{}
 	for _, v := range vms {
-		names = append(names, v.ID())
+		names = append(names, v.BaseImage)
 	}
 	return names
 }

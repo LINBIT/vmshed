@@ -268,8 +268,8 @@ func TestDeterminedTests(t *testing.T) {
 				} else {
 					if len(testSched) > 0 {
 						for _, vm := range tr.vms {
-							if !containsString(testSched, vm.ID()) {
-								t.Fatalf("Base %s not allowed for test %s", vm.ID(), tr.testID)
+							if !containsString(testSched, vm.BaseImage) {
+								t.Fatalf("Base %s not allowed for test %s", vm.BaseImage, tr.testID)
 							}
 						}
 					}

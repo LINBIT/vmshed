@@ -16,7 +16,6 @@ import (
 )
 
 type vm struct {
-	Name      string            `toml:"name"`
 	BaseImage string            `toml:"base_image"`
 	Values    map[string]string `toml:"values"`
 	Memory    string            `toml:"memory"`
@@ -25,13 +24,6 @@ type vm struct {
 	Disks     []string          `toml:"disks"`
 	VMTags    []string          `toml:"vm_tags"`
 	UserName  string            `toml:"user_name"`
-}
-
-func (v *vm) ID() string {
-	if v.Name != "" {
-		return v.Name
-	}
-	return v.BaseImage
 }
 
 type vmInstance struct {

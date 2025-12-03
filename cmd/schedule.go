@@ -117,7 +117,7 @@ func initializeState(suiteRun *testSuiteRun) *suiteState {
 	for _, v := range suiteRun.vmSpec.VMs {
 		state.baseImage[v.BaseImage] = initialBaseImageState
 
-		state.imageStage[v.ID()] = initialImageStage
+		state.imageStage[v.BaseImage] = initialImageStage
 	}
 
 	for i := 0; i < suiteRun.nrVMs; i++ {
@@ -204,7 +204,7 @@ func runStopping(suiteRun *testSuiteRun, state *suiteState) bool {
 			return true
 		}
 
-		if state.imageStage[v.ID()] == imageError {
+		if state.imageStage[v.BaseImage] == imageError {
 			return true
 		}
 	}
@@ -246,7 +246,7 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 	}
 
 	for i, v := range suiteRun.vmSpec.VMs {
-		if state.baseImage[v.BaseImage] == imageNone || state.imageStage[v.ID()] == imageNone {
+		if state.baseImage[v.BaseImage] == imageNone || state.imageStage[v.BaseImage] == imageNone {
 			return nextActionProvision(suiteRun, state, &suiteRun.vmSpec.VMs[i])
 		}
 	}
@@ -287,7 +287,7 @@ func allImagesReady(state *suiteState, run *testRun) bool {
 			return false
 		}
 
-		if state.imageStage[v.ID()] != imageReady {
+		if state.imageStage[v.BaseImage] != imageReady {
 			return false
 		}
 	}
@@ -541,11 +541,11 @@ type provisionImageAction struct {
 }
 
 func (a *provisionImageAction) name() string {
-	return fmt.Sprintf("Provision image %s with ID %d", a.v.ID(), a.id)
+	return fmt.Sprintf("Provision image %s with ID %d", a.v.BaseImage, a.id)
 }
 
 func (a *provisionImageAction) updatePre(state *suiteState) {
-	state.imageStage[a.v.ID()] = imageProvision
+	state.imageStage[a.v.BaseImage] = imageProvision
 	delete(state.freeIDs, a.id)
 	state.networks[a.networkName].stage = networkBusy
 }
@@ -558,12 +558,12 @@ func (a *provisionImageAction) updatePost(state *suiteState) {
 	state.networks[a.networkName].stage = networkReady
 	state.freeIDs[a.id] = true
 	if a.err == nil {
-		log.Infof("STATUS: Successfully provisioned %s", a.v.ID())
-		state.imageStage[a.v.ID()] = imageReady
+		log.Infof("STATUS: Successfully provisioned %s", a.v.BaseImage)
+		state.imageStage[a.v.BaseImage] = imageReady
 	} else {
-		state.imageStage[a.v.ID()] = imageError
+		state.imageStage[a.v.BaseImage] = imageError
 		state.errors = append(state.errors,
-			fmt.Errorf("provision %s: %w", a.v.ID(), a.err))
+			fmt.Errorf("provision %s: %w", a.v.BaseImage, a.err))
 	}
 }
 
