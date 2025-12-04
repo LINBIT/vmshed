@@ -206,6 +206,20 @@ func runStopping(suiteRun *testSuiteRun, state *suiteState) bool {
 }
 
 func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
+	if len(state.freeIDs) < 1 {
+		return nil
+	}
+
+	for i, v := range suiteRun.vmSpec.VMs {
+		if state.imageStage[v.BaseImage] == imageNone {
+			return nextActionPull(suiteRun, &suiteRun.vmSpec.VMs[i])
+		}
+
+		if state.imageStage[v.BaseImage] == imageBaseReady {
+			return nextActionProvision(suiteRun, state, &suiteRun.vmSpec.VMs[i])
+		}
+	}
+
 	// Ignore IDs which are being used for provisioning when deciding which
 	// test to work towards. This is necessary to ensure that larger tests
 	// are preferred for efficient use of the available IDs.
@@ -231,20 +245,6 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 		action := nextActionRun(suiteRun, state, bestRun)
 		if action != nil {
 			return action
-		}
-	}
-
-	if len(state.freeIDs) < 1 {
-		return nil
-	}
-
-	for i, v := range suiteRun.vmSpec.VMs {
-		if state.imageStage[v.BaseImage] == imageNone {
-			return nextActionPull(suiteRun, &suiteRun.vmSpec.VMs[i])
-		}
-
-		if state.imageStage[v.BaseImage] == imageBaseReady {
-			return nextActionProvision(suiteRun, state, &suiteRun.vmSpec.VMs[i])
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"text/template"
 )
 
 // TestTestChooseNextAction tests the scheduling choices by running a
@@ -27,9 +28,20 @@ func TestChooseNextAction(t *testing.T) {
 		testID: "t1VM",
 		vms:    []vm{vm0},
 	}
+	// 2 VMs mixed
 	testRun2VM := testRun{
 		testID: "t2VM",
 		vms:    []vm{vm0, vm1},
+	}
+	// 2 VMs both vm1
+	testRun2VM1 := testRun{
+		testID: "t2VM1",
+		vms:    []vm{vm1, vm1},
+	}
+	// 2 VMs both vm1 again
+	testRun2VM1Other := testRun{
+		testID: "t2VM1Other",
+		vms:    []vm{vm1, vm1},
 	}
 
 	type step struct {
@@ -163,6 +175,54 @@ func TestChooseNextAction(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "provision-priority",
+			suiteRun: testSuiteRun{
+				pullImageTemplate: template.Must(template.New("name").Parse("root/{{ .Image }}")),
+				vmSpec:            &vmSpecification{ProvisionFile: "/p", VMs: []vm{vm0, vm1}},
+				testRuns:          []testRun{testRun1VM, testRun2VM1, testRun2VM1Other},
+				startVM:           5,
+				nrVMs:             2,
+				firstV4Net:        baseNet,
+			},
+			sequence: []step{
+				{
+					expected: []action{
+						&pullImageAction{Image: "b0", ImageStageOnSuccess: imageBaseReady},
+						&pullImageAction{Image: "b1", ImageStageOnSuccess: imageBaseReady},
+					},
+				},
+				{
+					result:   &pullImageAction{Image: "b1", ImageStageOnSuccess: imageBaseReady},
+					expected: []action{accessNetworkAction(networkName0)},
+				},
+				{
+					result:   accessNetworkAction(networkName0),
+					expected: []action{&provisionImageAction{v: &vm1, id: 5, networkName: networkName0}},
+				},
+				{
+					result: &provisionImageAction{v: &vm1, id: 5, networkName: networkName0},
+					// while pull is pending, OK to start a test if possible.
+					expected: []action{&performTestAction{run: &testRun2VM1, ids: []int{5, 6}, networkNames: networkNames0}},
+				},
+				{
+					result: &pullImageAction{Image: "b0", ImageStageOnSuccess: imageBaseReady},
+				},
+				{
+					result: &performTestAction{run: &testRun2VM1, ids: []int{5, 6}, networkNames: networkNames0},
+					// now that pull is done, prefer provisioning over starting test.
+					expected: []action{&provisionImageAction{v: &vm0, id: 5, networkName: networkName0}},
+				},
+				{
+					result:   &provisionImageAction{v: &vm0, id: 5, networkName: networkName0},
+					expected: []action{&performTestAction{run: &testRun2VM1Other, ids: []int{5, 6}, networkNames: networkNames0}},
+				},
+				{
+					result:   &performTestAction{run: &testRun2VM1Other, ids: []int{5, 6}, networkNames: networkNames0},
+					expected: []action{&performTestAction{run: &testRun1VM, ids: []int{5}, networkNames: networkNames0}},
+				},
+			},
+		},
 	}
 
 	for _, test := range testCases {
@@ -228,6 +288,19 @@ func validateAction(t *testing.T, a, e action) {
 
 		if !reflect.DeepEqual(actual.networkNames, expected.networkNames) {
 			t.Errorf("test uses wrong networks, expected: '%v', actual: '%v'", expected.networkNames, actual.networkNames)
+		}
+	case *pullImageAction:
+		actual, ok := a.(*pullImageAction)
+		if !ok {
+			t.Fatalf("action type does not match, expected '%v', actual '%v'", reflect.TypeOf(expected), reflect.TypeOf(a))
+		}
+
+		if actual.Image != expected.Image {
+			t.Errorf("pull image does not match, expected: '%s', actual: '%s'", expected.Image, actual.Image)
+		}
+
+		if actual.ImageStageOnSuccess != expected.ImageStageOnSuccess {
+			t.Errorf("pull stage on success does not match, expected: '%s', actual: '%s'", expected.ImageStageOnSuccess, actual.ImageStageOnSuccess)
 		}
 	case *provisionImageAction:
 		actual, ok := a.(*provisionImageAction)
