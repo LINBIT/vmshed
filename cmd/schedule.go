@@ -239,7 +239,11 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 	}
 
 	for i, v := range suiteRun.vmSpec.VMs {
-		if state.imageStage[v.BaseImage] == imageNone || state.imageStage[v.BaseImage] == imageBaseReady {
+		if state.imageStage[v.BaseImage] == imageNone {
+			return nextActionPull(suiteRun, &suiteRun.vmSpec.VMs[i])
+		}
+
+		if state.imageStage[v.BaseImage] == imageBaseReady {
 			return nextActionProvision(suiteRun, state, &suiteRun.vmSpec.VMs[i])
 		}
 	}
@@ -400,23 +404,20 @@ func getIDs(suiteRun *testSuiteRun, state *suiteState, n int) []int {
 	return ids
 }
 
+func nextActionPull(suiteRun *testSuiteRun, v *vm) action {
+	stageOnSuccess := imageBaseReady
+	if suiteRun.vmSpec.ProvisionFile == "" {
+		stageOnSuccess = imageReady
+	}
+
+	return &pullImageAction{
+		Image:               v.BaseImage,
+		PullTemplate:        suiteRun.pullImageTemplate,
+		ImageStageOnSuccess: stageOnSuccess,
+	}
+}
+
 func nextActionProvision(suiteRun *testSuiteRun, state *suiteState, v *vm) action {
-	if state.imageStage[v.BaseImage] == imageNone {
-		stageOnSuccess := imageBaseReady
-		if suiteRun.vmSpec.ProvisionFile == "" {
-			stageOnSuccess = imageReady
-		}
-		return &pullImageAction{
-			Image:               v.BaseImage,
-			PullTemplate:        suiteRun.pullImageTemplate,
-			ImageStageOnSuccess: stageOnSuccess,
-		}
-	}
-
-	if state.imageStage[v.BaseImage] != imageBaseReady {
-		return nil
-	}
-
 	network := accessNetwork(false)
 	networkName := findReadyNetwork(state, nil, network, true)
 	if networkName == "" {
