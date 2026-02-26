@@ -1,0 +1,7 @@
+test_suite_file = "run.toml"
+
+[tests.first]
+vms = [1]
+
+[tests.second]
+vms = [1]

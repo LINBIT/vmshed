@@ -1,0 +1,5 @@
+test_suite_file = "run.toml"
+
+[tests.platformtest]
+vms = [1]
+needallplatforms = true

@@ -1,0 +1,5 @@
+[[vms]]
+base_image = "imageA"
+
+[[vms]]
+base_image = "imageB"

@@ -27,6 +27,19 @@ test:
     reports:
       junit: test.xml
 
+integration-test:
+  stage: test
+  cache:
+    key:
+      files:
+      - go.sum
+    paths:
+      - .go/pkg/mod
+  variables:
+    GOPATH: $CI_PROJECT_DIR/.go
+  script:
+    - make integration-test
+
 build:
   stage: build
   cache:

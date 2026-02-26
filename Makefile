@@ -10,6 +10,13 @@ vmshed: $(SOURCES)
 	[ -n "$(GOARCH)" ] && NAME="$${NAME}-$(GOARCH)"; \
 	go build -o "$$NAME" $(LDFLAGS) .
 
+tests/mockvirter/mockvirter: tests/mockvirter/main.go
+	go build -o $@ ./tests/mockvirter
+
+.PHONY: integration-test
+integration-test: vmshed tests/mockvirter/mockvirter
+	VMSHED_BINARY=$(PWD)/vmshed MOCK_VIRTER_BINARY=$(PWD)/tests/mockvirter/mockvirter go test -v ./tests/
+
 .PHONY: release
 release:
 	make vmshed GOOS=linux GOARCH=amd64

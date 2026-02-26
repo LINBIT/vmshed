@@ -1,0 +1,8 @@
+test_suite_file = "run.toml"
+
+[tests.anytest]
+vms = [1]
+
+[tests.gputest]
+vms = [1]
+vm_tags = ["gpu"]

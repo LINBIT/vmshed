@@ -1,0 +1,7 @@
+[[vms]]
+base_image = "imageA"
+vm_tags = ["fast"]
+
+[[vms]]
+base_image = "imageB"
+vm_tags = ["fast", "gpu"]
