@@ -7,6 +7,7 @@ import (
 	"net"
 	"os/exec"
 	"text/template"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -129,10 +130,18 @@ func scheduleLoop(ctx context.Context, suiteRun *testSuiteRun, state *suiteState
 
 	results := make(chan action)
 	activeActions := 0
+	softExpired := false
+
+	var softTimerC <-chan time.Time
+	if suiteRun.timeoutSoft > 0 {
+		timer := time.NewTimer(suiteRun.timeoutSoft)
+		defer timer.Stop()
+		softTimerC = timer.C
+	}
 
 	for {
 		for {
-			if runStopping(suiteRun, state) || ctx.Err() != nil {
+			if softExpired || runStopping(suiteRun, state) || ctx.Err() != nil {
 				break
 			}
 
@@ -151,19 +160,28 @@ func scheduleLoop(ctx context.Context, suiteRun *testSuiteRun, state *suiteState
 		}
 
 		if activeActions == 0 {
-			for _, run := range suiteRun.testRuns {
-				if state.runStage[run.testID] != runDone {
-					state.errors = append(state.errors, fmt.Errorf("Skipped test run: %s", run.testID))
+			if !softExpired {
+				for _, run := range suiteRun.testRuns {
+					if state.runStage[run.testID] != runDone {
+						state.runResults[run.testID] = testResult{status: StatusSkipped, err: fmt.Errorf("skipped")}
+						state.errors = append(state.errors, fmt.Errorf("Skipped test run: %s", run.testID))
+					}
 				}
 			}
 			break
 		}
 
 		log.Debugln("SCHEDULE: Wait for result")
-		r := <-results
-		activeActions--
-		log.Debugln("SCHEDULE: Apply result for:", r.name())
-		r.updatePost(state)
+		select {
+		case r := <-results:
+			activeActions--
+			log.Debugln("SCHEDULE: Apply result for:", r.name())
+			r.updatePost(state)
+		case <-softTimerC:
+			softTimerC = nil
+			softExpired = true
+			log.Infof("STATUS: Soft timeout reached, no new tests will be scheduled")
+		}
 
 		if runStopping(suiteRun, state) {
 			cancel()

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 )
 
 type invocation struct {
@@ -27,6 +28,17 @@ func main() {
 	}
 
 	subcmd := os.Args[1] + " " + os.Args[2]
+
+	delayOn := os.Getenv("MOCK_VIRTER_DELAY_ON")
+	if delayOn != "" && subcmd == delayOn {
+		d, err := time.ParseDuration(os.Getenv("MOCK_VIRTER_DELAY"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mock virter: bad MOCK_VIRTER_DELAY: %v\n", err)
+			os.Exit(2)
+		}
+		time.Sleep(d)
+	}
+
 	failOn := os.Getenv("MOCK_VIRTER_FAIL_ON")
 	if failOn != "" && subcmd == failOn {
 		fmt.Fprintf(os.Stderr, "mock virter: simulated failure on %q\n", subcmd)

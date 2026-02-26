@@ -105,6 +105,7 @@ type testSuiteRun struct {
 	printErrorDetails bool
 	logFormatVirter   string
 	pullImageTemplate *template.Template
+	timeoutSoft       time.Duration
 }
 
 func (f *FailurePolicy) String() string {
@@ -192,6 +193,7 @@ func rootCommand() *cobra.Command {
 	var firstv4Subnet string
 	var firstv6Subnet string
 	var pullImageTemplate TemplateFlag
+	var timeoutSoft time.Duration
 
 	rootCmd := &cobra.Command{
 		Use:   "vmshed",
@@ -276,6 +278,7 @@ current user.`,
 			suiteRun.firstV6Net = firstV6Net
 			suiteRun.logFormatVirter = logFormatVirter
 			suiteRun.pullImageTemplate = pullImageTemplate.Template
+			suiteRun.timeoutSoft = timeoutSoft
 
 			ctx, cancel := signal.NotifyContext(context.Background(), unix.SIGINT, unix.SIGTERM)
 			defer cancel()
@@ -318,6 +321,7 @@ current user.`,
 	rootCmd.Flags().StringVarP(&firstv4Subnet, "first-subnet", "", "10.224.0.0/24", "The first subnet to use for VMs. If more virtual networks are required, the next higher network of the same size will be used")
 	rootCmd.Flags().StringVarP(&firstv6Subnet, "first-v6-subnet", "", "fd62:a80c:412::/64", "The first ipv6 subnet to use for VMs. If more virtual networks are required, the next higher network of the same size will be used")
 	rootCmd.Flags().VarP(&pullImageTemplate, "pull-template", "", "Where to pull the base images from. Accepts a go template string, allowing usage like 'registry.example.com/vm/{{ .Image }}:latest'")
+	rootCmd.Flags().DurationVar(&timeoutSoft, "timeout-soft", 0, "Soft timeout for the entire test suite. Running tests finish but no new tests start. 0 means disabled.")
 	return rootCmd
 }
 
@@ -369,30 +373,36 @@ func createTestSuiteRun(
 func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int {
 	exitCode := 0
 	success := 0
+	runCount := 0
 	// count successes
 	for _, testRun := range suiteRun.testRuns {
-		if result, ok := results[testRun.testID]; ok && result.err == nil {
+		result, ok := results[testRun.testID]
+		if !ok {
+			continue
+		}
+
+		runCount++
+
+		if result.err == nil {
 			success++
 		} else {
 			exitCode = 1
 		}
 	}
-	successRate := (float32(success) / float32(len(suiteRun.testRuns))) * 100
+	successRate := (float32(success) / float32(runCount)) * 100
 	log.Infoln("|===================================================================================================")
-	log.Infof("| ** Results: %d/%d successful (%.2f%%)", success, len(suiteRun.testRuns), successRate)
+	log.Infof("| ** Results: %d/%d successful (%.2f%%)", success, runCount, successRate)
 	log.Infoln("|===================================================================================================")
 	sortedTestRuns := suiteRun.testRuns
 	sort.SliceStable(sortedTestRuns, func(i, j int) bool {
 		return sortedTestRuns[i].testName < sortedTestRuns[j].testName
 	})
 	for _, testRun := range sortedTestRuns {
-		status := StatusSkipped
-		tduration := 0 * time.Second
-		if result, ok := results[testRun.testID]; ok {
-			status = result.status
-			tduration = result.execTime
+		result, ok := results[testRun.testID]
+		if !ok {
+			continue
 		}
-		log.Infof("| %-11s: %-73s : %9s", status, testRun.testID, tduration.Round(time.Second))
+		log.Infof("| %-11s: %-73s : %9s", result.status, testRun.testID, result.execTime.Round(time.Second))
 	}
 	log.Infoln("|===================================================================================================")
 	logViewer := getLogViewUrl("")

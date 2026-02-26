@@ -45,11 +45,13 @@ var sameVmsTestsToml []byte
 var vmTagsTestsToml []byte
 
 type vmshedOpts struct {
-	VmsToml      []byte
-	TestsToml    []byte
-	VirterFailOn string
-	ExtraArgs    []string
-	ExitCode     int
+	VmsToml       []byte
+	TestsToml     []byte
+	VirterFailOn  string
+	VirterDelayOn string
+	VirterDelay   string
+	ExtraArgs     []string
+	ExitCode      int
 }
 
 type virterCall struct {
@@ -139,6 +141,10 @@ func runVmshed(t *testing.T, opts vmshedOpts) vmshedResult {
 	cmd.Env = append(cmd.Env, "MOCK_VIRTER_LOG="+virterLog)
 	if opts.VirterFailOn != "" {
 		cmd.Env = append(cmd.Env, "MOCK_VIRTER_FAIL_ON="+opts.VirterFailOn)
+	}
+	if opts.VirterDelayOn != "" {
+		cmd.Env = append(cmd.Env, "MOCK_VIRTER_DELAY_ON="+opts.VirterDelayOn)
+		cmd.Env = append(cmd.Env, "MOCK_VIRTER_DELAY="+opts.VirterDelay)
 	}
 	cmd.Dir = dir
 
@@ -458,4 +464,47 @@ func TestVMTags(t *testing.T) {
 		assert.Equal(t, "imageB", r.BaseImages[0],
 			"gputest should only use imageB which has the gpu tag")
 	}
+}
+
+func TestNetworkAddFail(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:      defaultVmsToml,
+		TestsToml:    defaultTestsToml,
+		VirterFailOn: "network add",
+		// vmshed should fail due to skipped test
+		ExitCode: 1,
+	})
+
+	assert.Equal(t, 0, countSubcommand(res.VirterCalls, "vm exec"),
+		"no tests should have started after access network add failed")
+	assert.Empty(t, res.Results, "no results should be written for network-add-fail test")
+}
+
+func TestTimeoutSoftAllSkipped(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:   defaultVmsToml,
+		TestsToml: twoTestsToml,
+		ExtraArgs: []string{"--timeout-soft", "1ns"},
+		ExitCode:  0,
+	})
+
+	assert.Equal(t, 0, countSubcommand(res.VirterCalls, "vm exec"),
+		"no tests should have started after soft timeout")
+	assert.Empty(t, res.Results, "no results should be written for timeout-soft-skipped test")
+}
+
+func TestTimeoutSoftPartialRun(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:       defaultVmsToml,
+		TestsToml:     twoTestsToml,
+		VirterDelayOn: "vm exec",
+		VirterDelay:   "1s",
+		ExtraArgs:     []string{"--timeout-soft", "200ms"},
+		ExitCode:      0,
+	})
+
+	assert.Equal(t, 1, countSubcommand(res.VirterCalls, "vm exec"),
+		"only one test should have started before soft timeout")
+	require.Len(t, res.Results, 1)
+	assert.Equal(t, "SUCCESS", res.Results[0].Status)
 }
