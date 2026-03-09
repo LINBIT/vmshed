@@ -106,7 +106,7 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 		argv = append(argv, "--set", "values."+key+"="+value)
 	}
 	if suiteRun.vmSpec.ProvisionBootCap != "" {
-		argv = append(argv, "--bootcap", suiteRun.vmSpec.ProvisionBootCap)
+		argv = append(argv, "--boot-capacity", suiteRun.vmSpec.ProvisionBootCap)
 	}
 	if suiteRun.vmSpec.ProvisionMemory != "" {
 		argv = append(argv, "--memory", suiteRun.vmSpec.ProvisionMemory)
@@ -216,7 +216,7 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 		"--console", run.outDir,
 		"--memory", vm.memory,
 		"--vcpus", strconv.Itoa(int(vm.vcpus)),
-		"--bootcapacity", vm.bootCap,
+		"--boot-capacity", vm.bootCap,
 	}
 
 	for _, disks := range vm.disks {
