@@ -1,0 +1,31 @@
+test_suite_file = "run.toml"
+
+[tests.test_a]
+vms = [1]
+
+[tests.test_b]
+vms = [1]
+
+[tests.test_c]
+vms = [1]
+
+[tests.test_d]
+vms = [1]
+
+[tests.test_e]
+vms = [1]
+
+[tests.test_f]
+vms = [1]
+
+[tests.test_g]
+vms = [1]
+
+[tests.test_h]
+vms = [1]
+
+[tests.test_i]
+vms = [1]
+
+[tests.test_j]
+vms = [1]

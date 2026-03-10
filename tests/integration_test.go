@@ -44,6 +44,9 @@ var sameVmsTestsToml []byte
 //go:embed testdata/tests_vm_tags.toml
 var vmTagsTestsToml []byte
 
+//go:embed testdata/tests_many.toml
+var manyTestsToml []byte
+
 type vmshedOpts struct {
 	VmsToml       []byte
 	TestsToml     []byte
@@ -61,6 +64,17 @@ type virterCall struct {
 func (c virterCall) Subcommand() string {
 	if len(c.Args) >= 2 {
 		return c.Args[0] + " " + c.Args[1]
+	}
+	return ""
+}
+
+func (c virterCall) TestName() string {
+	for i, arg := range c.Args {
+		if arg == "--set" && i+1 < len(c.Args) {
+			if name, ok := strings.CutPrefix(c.Args[i+1], "env.TEST_NAME="); ok {
+				return name
+			}
+		}
 	}
 	return ""
 }
@@ -507,4 +521,33 @@ func TestTimeoutSoftPartialRun(t *testing.T) {
 		"only one test should have started before soft timeout")
 	require.Len(t, res.Results, 1)
 	assert.Equal(t, "SUCCESS", res.Results[0].Status)
+}
+
+func TestRandomOrder(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:   defaultVmsToml,
+		TestsToml: manyTestsToml,
+	})
+
+	require.Len(t, res.Results, 10)
+	for _, r := range res.Results {
+		assert.Equal(t, "SUCCESS", r.Status)
+	}
+
+	// Extract test names in execution order from vm exec calls.
+	var execOrder []string
+	for _, c := range res.VirterCalls {
+		if name := c.TestName(); name != "" {
+			execOrder = append(execOrder, name)
+		}
+	}
+
+	require.Len(t, execOrder, 10)
+
+	sorted := []string{"test_a", "test_b", "test_c", "test_d", "test_e", "test_f", "test_g", "test_h", "test_i", "test_j"}
+
+	// With 10 tests, the chance of a random permutation matching sorted
+	// order is 1/10! ≈ 1/3628800, so this is safe to assert.
+	assert.NotEqual(t, sorted, execOrder,
+		"test execution order should be randomized, not sorted")
 }

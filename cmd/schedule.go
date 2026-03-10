@@ -277,23 +277,17 @@ func runBetter(state *suiteState, a *testRun, b testRun) bool {
 
 	// Prefer runs that use more VMs because that will generally
 	// use the available IDs more efficiently
-	if len(b.vms) < len(a.vms) {
-		return false
+	if len(b.vms) != len(a.vms) {
+		return len(b.vms) > len(a.vms)
 	}
 
-	if len(b.vms) > len(a.vms) {
-		return true
+	aReady := allImagesReady(state, a) && allNetworksReady(state, a)
+	bReady := allImagesReady(state, &b) && allNetworksReady(state, &b)
+	if bReady != aReady {
+		return bReady
 	}
 
-	if allImagesReady(state, a) && allNetworksReady(state, a) {
-		return false
-	}
-
-	if allImagesReady(state, &b) && allNetworksReady(state, &b) {
-		return true
-	}
-
-	return false
+	return b.priority > a.priority
 }
 
 func allImagesReady(state *suiteState, run *testRun) bool {

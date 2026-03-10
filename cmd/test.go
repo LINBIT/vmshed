@@ -27,6 +27,7 @@ type test struct {
 type testRun struct {
 	testName  string
 	testID    string
+	priority  uint64
 	outDir    string
 	vms       []vm
 	networks  []virterNet

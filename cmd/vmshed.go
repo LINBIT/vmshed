@@ -494,7 +494,7 @@ func determineRunsForTestVariant(randomGenerator *rand.Rand, config *testConfig,
 		if config.test.NeedAllPlatforms {
 			for _, v := range availableVMs {
 				testRuns = append(testRuns, newTestRun(
-					config, testVariant, repeatVM(v, vmCount), len(testRuns), config.test.Variables))
+					randomGenerator, config, testVariant, repeatVM(v, vmCount), len(testRuns), config.test.Variables))
 			}
 		} else if config.test.SameVMs {
 			v, err := randomVM(randomGenerator, availableVMs)
@@ -502,7 +502,7 @@ func determineRunsForTestVariant(randomGenerator *rand.Rand, config *testConfig,
 				return nil, err
 			}
 			testRuns = append(testRuns, newTestRun(
-				config, testVariant, repeatVM(v, vmCount), len(testRuns), config.test.Variables))
+				randomGenerator, config, testVariant, repeatVM(v, vmCount), len(testRuns), config.test.Variables))
 		} else {
 			var vms []vm
 			for i := 0; i < vmCount; i++ {
@@ -512,7 +512,8 @@ func determineRunsForTestVariant(randomGenerator *rand.Rand, config *testConfig,
 				}
 				vms = append(vms, v)
 			}
-			testRuns = append(testRuns, newTestRun(config, testVariant, vms, len(testRuns), config.test.Variables))
+			testRuns = append(testRuns, newTestRun(
+				randomGenerator, config, testVariant, vms, len(testRuns), config.test.Variables))
 		}
 	}
 
@@ -562,12 +563,18 @@ func matchingVMTags(requiredVMTags []string, vms []vm) []vm {
 	return possibleVMs
 }
 
-func newTestRun(config *testConfig, variant variant, vms []vm, testIndex int, variables map[string]string) testRun {
+func newTestRun(randomGenerator *rand.Rand, config *testConfig, variant variant, vms []vm, testIndex int, variables map[string]string) testRun {
 	testID := testIDString(config.testName, len(vms), variant.Name, testIndex)
 
 	run := testRun{
 		testName:  config.testName,
 		testID:    testID,
+		// Give each test run a random priority to avoid favoring one
+		// test over another when they are otherwise equal for the
+		// scheduler. This is especially relevant when --timeout-soft
+		// is used so that tests are not excluded just because they are
+		// listed later.
+		priority:  randomGenerator.Uint64(),
 		outDir:    filepath.Join(config.testLogDir, testID),
 		vms:       vms,
 		networks:  config.networks,
