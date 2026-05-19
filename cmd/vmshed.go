@@ -55,9 +55,9 @@ type vmSpecification struct {
 func (s *vmSpecification) ImageName(v *vm) string {
 	if s.ProvisionFile == "" {
 		// No provisioning, use base image directly
-		return v.BaseImage
+		return v.ID()
 	}
-	return fmt.Sprintf("%s-%s", v.BaseImage, s.Name)
+	return fmt.Sprintf("%s-%s", v.ID(), s.Name)
 }
 
 type testSpecification struct {
@@ -354,7 +354,7 @@ func createTestSuiteRun(
 	for _, run := range testRuns {
 		images := make([]string, len(run.vms))
 		for i, v := range run.vms {
-			images[i] = v.BaseImage
+			images[i] = v.ID()
 		}
 		imageString := strings.Join(images, ",")
 		log.Infof("PLAN: %s on %s", run.testID, imageString)
@@ -651,13 +651,13 @@ func removeUnusedVMs(vms []vm, testRuns []testRun) []vm {
 
 	for _, run := range testRuns {
 		for _, v := range run.vms {
-			usedVMs[v.BaseImage] = true
+			usedVMs[v.ID()] = true
 		}
 	}
 
 	selected := []vm{}
 	for _, v := range vms {
-		if usedVMs[v.BaseImage] {
+		if usedVMs[v.ID()] {
 			selected = append(selected, v)
 		}
 	}

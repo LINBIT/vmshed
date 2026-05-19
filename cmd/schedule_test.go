@@ -14,6 +14,9 @@ import (
 func TestChooseNextAction(t *testing.T) {
 	vm0 := vm{BaseImage: "b0"}
 	vm1 := vm{BaseImage: "b1"}
+	// Two VMs sharing the same base image but differing by Name (and Values).
+	vmSameA := vm{Name: "vm-same-a", BaseImage: "b0"}
+	vmSameB := vm{Name: "vm-same-b", BaseImage: "b0"}
 
 	_, baseNet, err := net.ParseCIDR("10.224.0.0/24")
 	if err != nil {
@@ -23,6 +26,7 @@ func TestChooseNextAction(t *testing.T) {
 	networkName0 := "vmshed-0-access"
 	networkNames0 := []string{networkName0}
 	networkName1 := "vmshed-1-access"
+	networkNames1 := []string{networkName1}
 
 	testRun1VM := testRun{
 		testID: "t1VM",
@@ -42,6 +46,14 @@ func TestChooseNextAction(t *testing.T) {
 	testRun2VM1Other := testRun{
 		testID: "t2VM1Other",
 		vms:    []vm{vm1, vm1},
+	}
+	testRunSameA := testRun{
+		testID: "tSameA",
+		vms:    []vm{vmSameA},
+	}
+	testRunSameB := testRun{
+		testID: "tSameB",
+		vms:    []vm{vmSameB},
 	}
 
 	type step struct {
@@ -188,12 +200,12 @@ func TestChooseNextAction(t *testing.T) {
 			sequence: []step{
 				{
 					expected: []action{
-						&pullImageAction{Image: "b0", ImageStageOnSuccess: imageBaseReady},
-						&pullImageAction{Image: "b1", ImageStageOnSuccess: imageBaseReady},
+						&pullImageAction{Image: "b0"},
+						&pullImageAction{Image: "b1"},
 					},
 				},
 				{
-					result:   &pullImageAction{Image: "b1", ImageStageOnSuccess: imageBaseReady},
+					result:   &pullImageAction{Image: "b1"},
 					expected: []action{accessNetworkAction(networkName0)},
 				},
 				{
@@ -206,7 +218,7 @@ func TestChooseNextAction(t *testing.T) {
 					expected: []action{&performTestAction{run: &testRun2VM1, ids: []int{5, 6}, networkNames: networkNames0}},
 				},
 				{
-					result: &pullImageAction{Image: "b0", ImageStageOnSuccess: imageBaseReady},
+					result: &pullImageAction{Image: "b0"},
 				},
 				{
 					result: &performTestAction{run: &testRun2VM1, ids: []int{5, 6}, networkNames: networkNames0},
@@ -220,6 +232,42 @@ func TestChooseNextAction(t *testing.T) {
 				{
 					result:   &performTestAction{run: &testRun2VM1Other, ids: []int{5, 6}, networkNames: networkNames0},
 					expected: []action{&performTestAction{run: &testRun1VM, ids: []int{5}, networkNames: networkNames0}},
+				},
+			},
+		},
+		{
+			// Regression test: two VMs with the same BaseImage but different Names
+			// must each be provisioned independently into their own images.
+			name: "provision-same-base-image",
+			suiteRun: testSuiteRun{
+				vmSpec:     &vmSpecification{ProvisionFile: "/p", VMs: []vm{vmSameA, vmSameB}},
+				testRuns:   []testRun{testRunSameA, testRunSameB},
+				startVM:    5,
+				nrVMs:      2,
+				firstV4Net: baseNet,
+			},
+			sequence: []step{
+				{
+					expected: []action{accessNetworkAction(networkName0)},
+				},
+				{
+					result: accessNetworkAction(networkName0),
+					expected: []action{
+						&provisionImageAction{v: &vmSameA, id: 5, networkName: networkName0},
+						accessNetworkAction(networkName1),
+					},
+				},
+				{
+					result:   accessNetworkAction(networkName1),
+					expected: []action{&provisionImageAction{v: &vmSameB, id: 6, networkName: networkName1}},
+				},
+				{
+					result:   &provisionImageAction{v: &vmSameA, id: 5, networkName: networkName0},
+					expected: []action{&performTestAction{run: &testRunSameA, ids: []int{5}, networkNames: networkNames0}},
+				},
+				{
+					result:   &provisionImageAction{v: &vmSameB, id: 6, networkName: networkName1},
+					expected: []action{&performTestAction{run: &testRunSameB, ids: []int{6}, networkNames: networkNames1}},
 				},
 			},
 		},
@@ -298,18 +346,14 @@ func validateAction(t *testing.T, a, e action) {
 		if actual.Image != expected.Image {
 			t.Errorf("pull image does not match, expected: '%s', actual: '%s'", expected.Image, actual.Image)
 		}
-
-		if actual.ImageStageOnSuccess != expected.ImageStageOnSuccess {
-			t.Errorf("pull stage on success does not match, expected: '%s', actual: '%s'", expected.ImageStageOnSuccess, actual.ImageStageOnSuccess)
-		}
 	case *provisionImageAction:
 		actual, ok := a.(*provisionImageAction)
 		if !ok {
 			t.Fatalf("action type does not match, expected '%v', actual '%v'", reflect.TypeOf(expected), reflect.TypeOf(a))
 		}
 
-		if actual.v.BaseImage != expected.v.BaseImage {
-			t.Errorf("VM base image does not match, expected: '%s', actual: '%s'", expected.v.BaseImage, actual.v.BaseImage)
+		if actual.v.ID() != expected.v.ID() {
+			t.Errorf("VM base image does not match, expected: '%s', actual: '%s'", expected.v.ID(), actual.v.ID())
 		}
 
 		if actual.id != expected.id {

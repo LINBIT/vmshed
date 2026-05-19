@@ -30,12 +30,19 @@ type networkState struct {
 type imageStage string
 
 const (
-	imageNone      imageStage = "None"
-	imagePull      imageStage = "Pull"
-	imageBaseReady imageStage = "BaseReady"
-	imageProvision imageStage = "Provision"
-	imageReady     imageStage = "Ready"
-	imageError     imageStage = "Error"
+	imageNone  imageStage = "None"
+	imagePull  imageStage = "Pull"
+	imageReady imageStage = "Ready"
+	imageError imageStage = "Error"
+)
+
+type provisionStage string
+
+const (
+	provisionNone  provisionStage = "None"
+	provisionExec  provisionStage = "Exec"
+	provisionDone  provisionStage = "Done"
+	provisionError provisionStage = "Error"
 )
 
 type runStage string
@@ -47,13 +54,16 @@ const (
 )
 
 type suiteState struct {
-	networks   map[string]*networkState
+	networks map[string]*networkState
+	// Indexed by base image
 	imageStage map[string]imageStage
-	runStage   map[string]runStage
-	runResults map[string]testResult
-	freeIDs    map[int]bool
-	freeNets   *networkList
-	errors     []error
+	// Indexed by VM ID
+	provisionStage map[string]provisionStage
+	runStage       map[string]runStage
+	runResults     map[string]testResult
+	freeIDs        map[int]bool
+	freeNets       *networkList
+	errors         []error
 }
 
 type action interface {
@@ -95,12 +105,13 @@ func initializeState(suiteRun *testSuiteRun) *suiteState {
 	netlist := NewNetworkList(suiteRun.firstV4Net, suiteRun.firstV6Net)
 
 	state := suiteState{
-		networks:   make(map[string]*networkState),
-		imageStage: make(map[string]imageStage),
-		runStage:   make(map[string]runStage),
-		runResults: make(map[string]testResult),
-		freeIDs:    make(map[int]bool),
-		freeNets:   netlist,
+		networks:       make(map[string]*networkState),
+		imageStage:     make(map[string]imageStage),
+		provisionStage: make(map[string]provisionStage),
+		runStage:       make(map[string]runStage),
+		runResults:     make(map[string]testResult),
+		freeIDs:        make(map[int]bool),
+		freeNets:       netlist,
 	}
 	for _, run := range suiteRun.testRuns {
 		state.runStage[run.testID] = runNew
@@ -108,14 +119,17 @@ func initializeState(suiteRun *testSuiteRun) *suiteState {
 
 	initialImageStage := imageNone
 	if suiteRun.pullImageTemplate == nil {
-		initialImageStage = imageBaseReady
-
-		if suiteRun.vmSpec.ProvisionFile == "" {
-			initialImageStage = imageReady
-		}
+		initialImageStage = imageReady
 	}
+
+	initialProvisionStage := provisionNone
+	if suiteRun.vmSpec.ProvisionFile == "" {
+		initialProvisionStage = provisionDone
+	}
+
 	for _, v := range suiteRun.vmSpec.VMs {
 		state.imageStage[v.BaseImage] = initialImageStage
+		state.provisionStage[v.ID()] = initialProvisionStage
 	}
 
 	for i := 0; i < suiteRun.nrVMs; i++ {
@@ -218,6 +232,10 @@ func runStopping(suiteRun *testSuiteRun, state *suiteState) bool {
 		if state.imageStage[v.BaseImage] == imageError {
 			return true
 		}
+
+		if state.provisionStage[v.ID()] == provisionError {
+			return true
+		}
 	}
 
 	return false
@@ -233,7 +251,7 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 			return nextActionPull(suiteRun, &suiteRun.vmSpec.VMs[i])
 		}
 
-		if state.imageStage[v.BaseImage] == imageBaseReady {
+		if state.imageStage[v.BaseImage] == imageReady && state.provisionStage[v.ID()] == provisionNone {
 			return nextActionProvision(suiteRun, state, &suiteRun.vmSpec.VMs[i])
 		}
 	}
@@ -293,6 +311,10 @@ func runBetter(state *suiteState, a *testRun, b testRun) bool {
 func allImagesReady(state *suiteState, run *testRun) bool {
 	for _, v := range run.vms {
 		if state.imageStage[v.BaseImage] != imageReady {
+			return false
+		}
+
+		if state.provisionStage[v.ID()] != provisionDone {
 			return false
 		}
 	}
@@ -417,15 +439,9 @@ func getIDs(suiteRun *testSuiteRun, state *suiteState, n int) []int {
 }
 
 func nextActionPull(suiteRun *testSuiteRun, v *vm) action {
-	stageOnSuccess := imageBaseReady
-	if suiteRun.vmSpec.ProvisionFile == "" {
-		stageOnSuccess = imageReady
-	}
-
 	return &pullImageAction{
-		Image:               v.BaseImage,
-		PullTemplate:        suiteRun.pullImageTemplate,
-		ImageStageOnSuccess: stageOnSuccess,
+		Image:        v.BaseImage,
+		PullTemplate: suiteRun.pullImageTemplate,
 	}
 }
 
@@ -517,10 +533,9 @@ func (a *performTestAction) updatePost(state *suiteState) {
 }
 
 type pullImageAction struct {
-	Image               string
-	PullTemplate        *template.Template
-	ImageStageOnSuccess imageStage
-	err                 error
+	Image        string
+	PullTemplate *template.Template
+	err          error
 }
 
 func (b *pullImageAction) name() string {
@@ -537,7 +552,7 @@ func (b *pullImageAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
 
 func (b *pullImageAction) updatePost(state *suiteState) {
 	if b.err == nil {
-		state.imageStage[b.Image] = b.ImageStageOnSuccess
+		state.imageStage[b.Image] = imageReady
 	} else {
 		state.imageStage[b.Image] = imageError
 		state.errors = append(state.errors, fmt.Errorf("pull image %s: %w", b.Image, b.err))
@@ -552,11 +567,11 @@ type provisionImageAction struct {
 }
 
 func (a *provisionImageAction) name() string {
-	return fmt.Sprintf("Provision image %s with ID %d", a.v.BaseImage, a.id)
+	return fmt.Sprintf("Provision image %s with ID %d", a.v.ID(), a.id)
 }
 
 func (a *provisionImageAction) updatePre(state *suiteState) {
-	state.imageStage[a.v.BaseImage] = imageProvision
+	state.provisionStage[a.v.ID()] = provisionExec
 	delete(state.freeIDs, a.id)
 	state.networks[a.networkName].stage = networkBusy
 }
@@ -569,12 +584,12 @@ func (a *provisionImageAction) updatePost(state *suiteState) {
 	state.networks[a.networkName].stage = networkReady
 	state.freeIDs[a.id] = true
 	if a.err == nil {
-		log.Infof("STATUS: Successfully provisioned %s", a.v.BaseImage)
-		state.imageStage[a.v.BaseImage] = imageReady
+		log.Infof("STATUS: Successfully provisioned %s", a.v.ID())
+		state.provisionStage[a.v.ID()] = provisionDone
 	} else {
-		state.imageStage[a.v.BaseImage] = imageError
+		state.provisionStage[a.v.ID()] = provisionError
 		state.errors = append(state.errors,
-			fmt.Errorf("provision %s: %w", a.v.BaseImage, a.err))
+			fmt.Errorf("provision %s: %w", a.v.ID(), a.err))
 	}
 }
 
