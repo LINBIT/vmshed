@@ -27,13 +27,13 @@ type networkState struct {
 	stage    networkStage
 }
 
-type imageStage string
+type pullStage string
 
 const (
-	imageNone  imageStage = "None"
-	imagePull  imageStage = "Pull"
-	imageReady imageStage = "Ready"
-	imageError imageStage = "Error"
+	pullNone  pullStage = "None"
+	pullExec  pullStage = "Pull"
+	pullDone  pullStage = "Done"
+	pullError pullStage = "Error"
 )
 
 type provisionStage string
@@ -56,7 +56,7 @@ const (
 type suiteState struct {
 	networks map[string]*networkState
 	// Indexed by base image
-	imageStage map[string]imageStage
+	pullStage map[string]pullStage
 	// Indexed by VM ID
 	provisionStage map[string]provisionStage
 	runStage       map[string]runStage
@@ -106,7 +106,7 @@ func initializeState(suiteRun *testSuiteRun) *suiteState {
 
 	state := suiteState{
 		networks:       make(map[string]*networkState),
-		imageStage:     make(map[string]imageStage),
+		pullStage:      make(map[string]pullStage),
 		provisionStage: make(map[string]provisionStage),
 		runStage:       make(map[string]runStage),
 		runResults:     make(map[string]testResult),
@@ -117,9 +117,9 @@ func initializeState(suiteRun *testSuiteRun) *suiteState {
 		state.runStage[run.testID] = runNew
 	}
 
-	initialImageStage := imageNone
+	initialPullStage := pullNone
 	if suiteRun.pullImageTemplate == nil {
-		initialImageStage = imageReady
+		initialPullStage = pullDone
 	}
 
 	initialProvisionStage := provisionNone
@@ -128,7 +128,7 @@ func initializeState(suiteRun *testSuiteRun) *suiteState {
 	}
 
 	for _, v := range suiteRun.vmSpec.VMs {
-		state.imageStage[v.BaseImage] = initialImageStage
+		state.pullStage[v.BaseImage] = initialPullStage
 		state.provisionStage[v.ID()] = initialProvisionStage
 	}
 
@@ -229,7 +229,7 @@ func runStopping(suiteRun *testSuiteRun, state *suiteState) bool {
 	}
 
 	for _, v := range suiteRun.vmSpec.VMs {
-		if state.imageStage[v.BaseImage] == imageError {
+		if state.pullStage[v.BaseImage] == pullError {
 			return true
 		}
 
@@ -247,11 +247,11 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 	}
 
 	for i, v := range suiteRun.vmSpec.VMs {
-		if state.imageStage[v.BaseImage] == imageNone {
+		if state.pullStage[v.BaseImage] == pullNone {
 			return nextActionPull(suiteRun, &suiteRun.vmSpec.VMs[i])
 		}
 
-		if state.imageStage[v.BaseImage] == imageReady && state.provisionStage[v.ID()] == provisionNone {
+		if state.pullStage[v.BaseImage] == pullDone && state.provisionStage[v.ID()] == provisionNone {
 			return nextActionProvision(suiteRun, state, &suiteRun.vmSpec.VMs[i])
 		}
 	}
@@ -310,7 +310,7 @@ func runBetter(state *suiteState, a *testRun, b testRun) bool {
 
 func allImagesReady(state *suiteState, run *testRun) bool {
 	for _, v := range run.vms {
-		if state.imageStage[v.BaseImage] != imageReady {
+		if state.pullStage[v.BaseImage] != pullDone {
 			return false
 		}
 
@@ -543,7 +543,7 @@ func (b *pullImageAction) name() string {
 }
 
 func (b *pullImageAction) updatePre(state *suiteState) {
-	state.imageStage[b.Image] = imagePull
+	state.pullStage[b.Image] = pullExec
 }
 
 func (b *pullImageAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
@@ -552,9 +552,9 @@ func (b *pullImageAction) exec(ctx context.Context, suiteRun *testSuiteRun) {
 
 func (b *pullImageAction) updatePost(state *suiteState) {
 	if b.err == nil {
-		state.imageStage[b.Image] = imageReady
+		state.pullStage[b.Image] = pullDone
 	} else {
-		state.imageStage[b.Image] = imageError
+		state.pullStage[b.Image] = pullError
 		state.errors = append(state.errors, fmt.Errorf("pull image %s: %w", b.Image, b.err))
 	}
 }
