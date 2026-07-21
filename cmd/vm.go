@@ -256,25 +256,29 @@ func shutdownVMs(logger *log.Logger, outDir string, res *testResult, suiteRun *t
 		return
 	}
 
+	if len(testnodes) == 0 {
+		return
+	}
+
 	vmNames := make([]string, 0, len(testnodes))
-
 	for _, vm := range testnodes {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+		vmNames = append(vmNames, vm.vmName())
+	}
 
-		vmName := vm.vmName()
-		vmNames = append(vmNames, vmName)
+	ctx, cancel := context.WithTimeout(context.Background(), suiteRun.vmRmTimeout)
+	defer cancel()
 
-		argv := []string{"virter", "vm", "rm", vmName}
-		stderrPath := filepath.Join(outDir, fmt.Sprintf("vm_rm_%s.log", vmName))
-		logger.Debugf("EXECUTING: %s", argv)
-		cmd := exec.Command(argv[0], argv[1:]...)
-		cmd.Env = virterEnv(vm.networkNames[0])
-		if err := cmdStderrTerm(ctx, logger, stderrPath, "", cmd); err != nil {
-			logger.Errorf("ERROR: Could not stop VM %s: %v", vmName, err)
-			dumpStderr(logger, err)
-			// do not return, keep going...
-		}
+	// All test nodes share the same test network, so "virter vm rm" can remove
+	// them in a single call.
+	argv := append([]string{"virter", "vm", "rm"}, vmNames...)
+	stderrPath := filepath.Join(outDir, "vm_rm.log")
+	logger.Debugf("EXECUTING: %s", argv)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = virterEnv(testnodes[0].networkNames[0])
+	if err := cmdStderrTerm(ctx, logger, stderrPath, "", cmd); err != nil {
+		logger.Errorf("ERROR: Could not remove VMs %s: %v", strings.Join(vmNames, " "), err)
+		dumpStderr(logger, err)
+		// do not return, keep going...
 	}
 
 	// Log a line at the end so that the runtime of the commands above can be estimated

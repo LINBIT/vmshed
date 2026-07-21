@@ -106,6 +106,7 @@ type testSuiteRun struct {
 	logFormatVirter   string
 	pullImageTemplate *template.Template
 	timeoutSoft       time.Duration
+	vmRmTimeout       time.Duration
 }
 
 func (f *FailurePolicy) String() string {
@@ -194,6 +195,7 @@ func rootCommand() *cobra.Command {
 	var firstv6Subnet string
 	var pullImageTemplate TemplateFlag
 	var timeoutSoft time.Duration
+	var vmRmTimeout time.Duration
 
 	rootCmd := &cobra.Command{
 		Use:   "vmshed",
@@ -279,6 +281,7 @@ current user.`,
 			suiteRun.logFormatVirter = logFormatVirter
 			suiteRun.pullImageTemplate = pullImageTemplate.Template
 			suiteRun.timeoutSoft = timeoutSoft
+			suiteRun.vmRmTimeout = vmRmTimeout
 
 			ctx, cancel := signal.NotifyContext(context.Background(), unix.SIGINT, unix.SIGTERM)
 			defer cancel()
@@ -322,6 +325,7 @@ current user.`,
 	rootCmd.Flags().StringVarP(&firstv6Subnet, "first-v6-subnet", "", "fd62:a80c:412::/64", "The first ipv6 subnet to use for VMs. If more virtual networks are required, the next higher network of the same size will be used")
 	rootCmd.Flags().VarP(&pullImageTemplate, "pull-template", "", "Where to pull the base images from. Accepts a go template string, allowing usage like 'registry.example.com/vm/{{ .Image }}:latest'")
 	rootCmd.Flags().DurationVar(&timeoutSoft, "timeout-soft", 0, "Soft timeout for the entire test suite. Running tests finish but no new tests start. 0 means disabled.")
+	rootCmd.Flags().DurationVar(&vmRmTimeout, "vm-rm-timeout", 30*time.Second, "Timeout for removing the VMs of a test run")
 	return rootCmd
 }
 
