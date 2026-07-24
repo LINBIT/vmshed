@@ -334,12 +334,34 @@ func createTestSuiteRun(
 	repeats int,
 	variantsToRun []string) (testSuiteRun, error) {
 
-	for testName := range testSpec.Tests {
-		if toRun != "all" && toRun != "" { //filter tests to Run
-			if !containsString(strings.Split(toRun, ","), testName) {
+	if toRun != "all" && toRun != "" { //filter tests to Run
+		requested := strings.Split(toRun, ",")
+
+		// A name in --torun that does not match any test in the
+		// specification is almost always a typo. Report all such names
+		// and fail fast, rather than silently running a subset (or
+		// nothing at all).
+		var unknown []string
+		for _, testName := range requested {
+			if _, ok := testSpec.Tests[testName]; !ok {
+				unknown = append(unknown, testName)
+			}
+		}
+		if len(unknown) > 0 {
+			return testSuiteRun{}, fmt.Errorf(
+				"--torun lists test(s) not found in the test specification: %s",
+				strings.Join(unknown, ", "))
+		}
+
+		for testName := range testSpec.Tests {
+			if !containsString(requested, testName) {
 				delete(testSpec.Tests, testName)
 			}
 		}
+	}
+
+	if len(testSpec.Tests) == 0 {
+		return testSuiteRun{}, errors.New("no tests to run")
 	}
 
 	testSpec.Variants = filterVariants(testSpec.Variants, variantsToRun)

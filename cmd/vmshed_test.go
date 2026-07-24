@@ -284,6 +284,68 @@ func TestDeterminedTests(t *testing.T) {
 	}
 }
 
+func TestToRunErrors(t *testing.T) {
+	const testSpecToml = `test_suite_file = "run.toml"
+
+	[tests]
+	[tests.test_list_commands]
+	vms = [1, 2]
+
+	[tests.test_auto_place_replicas_on_same]
+	vms = [4]`
+
+	testCases := []struct {
+		name string
+		// toRun is expected to trigger an error, and the error message
+		// is expected to mention each of these substrings.
+		toRun     string
+		wantInErr []string
+	}{
+		{
+			name:      "singleTypo",
+			toRun:     "test_list_comands",
+			wantInErr: []string{"test_list_comands"},
+		},
+		{
+			name:      "typoAmongValid",
+			toRun:     "test_list_commands,test_auto_place_replias_on_same",
+			wantInErr: []string{"test_auto_place_replias_on_same"},
+		},
+		{
+			name:      "allTyped",
+			toRun:     "does_not_exist,also_missing",
+			wantInErr: []string{"does_not_exist", "also_missing"},
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.name, func(t *testing.T) {
+			var vmSpec vmSpecification
+			if _, err := toml.Decode(vmSpecToml, &vmSpec); err != nil {
+				t.Fatal(err)
+			}
+			vmSpec.ProvisionFile = joinIfRel("/tmp", vmSpec.ProvisionFile)
+			vmSpec.ProvisionTimeout = durationDefault(vmSpec.ProvisionTimeout, 3*time.Minute)
+			vmSpec.VMs = filterVMs(vmSpec.VMs, []string{}, []string{})
+
+			var testSpec testSpecification
+			if _, err := toml.Decode(testSpecToml, &testSpec); err != nil {
+				t.Fatal(err)
+			}
+			testSpec.TestSuiteFile = joinIfRel("/tmp", testSpec.TestSuiteFile)
+			testSpec.TestTimeout = durationDefault(testSpec.TestTimeout, 5*time.Minute)
+
+			_, err := createTestSuiteRun(
+				rand.New(rand.NewSource(12345678)),
+				vmSpec, testSpec, test.toRun, "", 1, nil)
+			require.Error(t, err)
+			for _, want := range test.wantInErr {
+				require.Contains(t, err.Error(), want)
+			}
+		})
+	}
+}
+
 func TestFilterVMs(t *testing.T) {
 	vms := []vm{
 		{BaseImage: "rhel-9-drbd-k427"},
