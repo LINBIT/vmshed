@@ -21,18 +21,20 @@ type test struct {
 	NeedAllPlatforms bool              `toml:"needallplatforms"` // test need to run on all platforms
 	Variants         []string          `toml:"variants"`         // only run on given variants, if empty all
 	Networks         []virterNet       `toml:"networks"`         // Extra NIC to add to the VMs
+	SharedDisks      []sharedDisk      `toml:"shared_disks"`     // Disks attached to all VMs of the test
 	Variables        map[string]string `toml:"variables"`        // overwrite variables from variants
 }
 
 type testRun struct {
-	testName  string
-	testID    string
-	priority  uint64
-	outDir    string
-	vms       []vm
-	networks  []virterNet
-	variant   variant
-	variables map[string]string
+	testName    string
+	testID      string
+	priority    uint64
+	outDir      string
+	vms         []vm
+	networks    []virterNet
+	sharedDisks []sharedDiskInstance
+	variant     variant
+	variables   map[string]string
 }
 
 type TestStatus string
@@ -81,6 +83,11 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 		}
 	}
 
+	sharedDiskArgs := make([]string, 0, len(run.sharedDisks))
+	for _, d := range run.sharedDisks {
+		sharedDiskArgs = append(sharedDiskArgs, d.runArg())
+	}
+
 	var vms []vmInstance
 	for i, v := range run.vms {
 		var memory string
@@ -118,6 +125,7 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 			vcpus:        vcpus,
 			bootCap:      bootCap,
 			disks:        disks,
+			sharedDisks:  sharedDiskArgs,
 			networkNames: networkNames,
 			UserName:     userName,
 		}
@@ -172,6 +180,21 @@ func execTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, accessN
 	logger := TestLogger(run.testID, &res.log)
 
 	logger.Debugf("EXECUTING: %s Nodes(%+v)", run.testID, testnodes)
+
+	// Create shared disks
+	if len(run.sharedDisks) > 0 {
+		start := time.Now()
+		err := createSharedDisks(ctx, logger, run.outDir, run.sharedDisks)
+		// Removal is deferred before shutdownVMs so that it runs after
+		// the VMs are gone and the disks are no longer attached.
+		defer removeSharedDisks(logger, run.outDir, &res, suiteRun, run.sharedDisks)
+		if err != nil {
+			res.status = StatusError
+			res.err = fmt.Errorf("failed to create shared disks: %w", err)
+			return res
+		}
+		logger.Debugf("EXECUTIONTIME: Creating shared disks: %v", time.Since(start))
+	}
 
 	// Start VMs
 	start := time.Now()

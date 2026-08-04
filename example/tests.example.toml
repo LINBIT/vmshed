@@ -39,3 +39,10 @@ samevms = true
 forward = "nat"
 dhcp = true
 domain = "third-net"
+
+[tests.shared_disk]
+vms = [2]
+[[tests.shared_disk.shared_disks]]
+name = "shared0"
+size = "1G"
+bus = "scsi"

@@ -47,6 +47,9 @@ var vmTagsTestsToml []byte
 //go:embed testdata/tests_many.toml
 var manyTestsToml []byte
 
+//go:embed testdata/tests_shared_disks.toml
+var sharedDisksTestsToml []byte
+
 type vmshedOpts struct {
 	VmsToml       []byte
 	TestsToml     []byte
@@ -263,6 +266,46 @@ func TestSimpleSuccess(t *testing.T) {
 
 	require.Len(t, res.Results, 1)
 	assert.Equal(t, "SUCCESS", res.Results[0].Status)
+}
+
+func TestSharedDisks(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:   defaultVmsToml,
+		TestsToml: sharedDisksTestsToml,
+	})
+
+	expected := []string{"image ls", "network add", "disk rm", "disk create", "vm rm", "vm run", "vm exec", "vm rm", "disk rm", "network rm"}
+	assert.Equal(t, expected, subcommands(res.VirterCalls))
+
+	for _, call := range res.VirterCalls {
+		switch call.Subcommand() {
+		case "disk create":
+			assert.Equal(t, []string{"disk", "create", "lbtest-disk-mytest-1-default-0-shared0", "--size", "1G"}, call.Args)
+		case "vm run":
+			assert.Contains(t, call.Args, "--shared-disk")
+			assert.Contains(t, call.Args, "name=lbtest-disk-mytest-1-default-0-shared0,bus=scsi")
+		}
+	}
+
+	require.Len(t, res.Results, 1)
+	assert.Equal(t, "SUCCESS", res.Results[0].Status)
+}
+
+func TestSharedDiskCreateFail(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:      defaultVmsToml,
+		TestsToml:    sharedDisksTestsToml,
+		VirterFailOn: "disk create",
+		ExitCode:     1,
+	})
+
+	// The shared disk is removed even though the test never started,
+	// and no VM is ever run.
+	expected := []string{"image ls", "network add", "disk rm", "disk create", "disk rm", "network rm"}
+	assert.Equal(t, expected, subcommands(res.VirterCalls))
+
+	require.Len(t, res.Results, 1)
+	assert.Equal(t, "ERROR", res.Results[0].Status)
 }
 
 func TestMultipleTestsSuccess(t *testing.T) {

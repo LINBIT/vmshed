@@ -93,3 +93,27 @@ Array of String. Run this test for only these variants.
 
 Array of Table. Additional networks that are added to this test only. See
 [`networks`](#networks-array-of-table) for a description of the keys.
+
+### `tests.<test_name>.shared_disks`
+
+Array of Table. Disks that are attached to all VMs of the test at the same
+time, for example to simulate a SAN attached volume. The guests need to use a
+cluster aware filesystem or lock manager (for example lvmlockd with sanlock)
+to safely access such a disk.
+
+The disks are created with `virter disk create` before the VMs are started and
+removed after the VMs are removed. With `--on-failure keep-vms`, the disks of
+a failed test are kept along with the VMs.
+
+#### `tests.<test_name>.shared_disks.name`
+
+String. Required. Name of the disk. The volume name is prefixed with the ID
+of the test run, so concurrent tests do not conflict.
+
+#### `tests.<test_name>.shared_disks.size`
+
+String. Required. Size of the disk, for example `"1G"`.
+
+#### `tests.<test_name>.shared_disks.bus`
+
+String. Bus used to attach the disk to the VMs. Defaults to `virtio`.

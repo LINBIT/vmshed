@@ -41,6 +41,7 @@ type vmInstance struct {
 	vcpus        uint
 	bootCap      string
 	disks        []string
+	sharedDisks  []string
 	networkNames []string
 	UserName     string
 }
@@ -229,6 +230,9 @@ func runVM(ctx context.Context, logger *log.Logger, run *testRun, vm vmInstance)
 
 	for _, disks := range vm.disks {
 		argv = append(argv, "--disk", disks)
+	}
+	for _, sharedDisk := range vm.sharedDisks {
+		argv = append(argv, "--shared-disk", sharedDisk)
 	}
 	for _, networkName := range vm.networkNames[1:] {
 		argv = append(argv, "--nic", fmt.Sprintf("type=network,source=%s", networkName))

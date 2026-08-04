@@ -468,6 +468,11 @@ func determineAllTestRuns(
 
 	testRuns := []testRun{}
 	for testName, test := range testSpec.Tests {
+		for _, disk := range test.SharedDisks {
+			if disk.Name == "" || disk.Size == "" {
+				return nil, fmt.Errorf("test %s: shared disks require both name and size", testName)
+			}
+		}
 		config := testConfig{
 			testLogDir: testLogDir,
 			vmSpec:     vmSpec,
@@ -592,20 +597,26 @@ func matchingVMTags(requiredVMTags []string, vms []vm) []vm {
 func newTestRun(randomGenerator *rand.Rand, config *testConfig, variant variant, vms []vm, testIndex int, variables map[string]string) testRun {
 	testID := testIDString(config.testName, len(vms), variant.Name, testIndex)
 
+	var sharedDisks []sharedDiskInstance
+	for _, d := range config.test.SharedDisks {
+		sharedDisks = append(sharedDisks, newSharedDiskInstance(d, testID))
+	}
+
 	run := testRun{
-		testName:  config.testName,
-		testID:    testID,
+		testName: config.testName,
+		testID:   testID,
 		// Give each test run a random priority to avoid favoring one
 		// test over another when they are otherwise equal for the
 		// scheduler. This is especially relevant when --timeout-soft
 		// is used so that tests are not excluded just because they are
 		// listed later.
-		priority:  randomGenerator.Uint64(),
-		outDir:    filepath.Join(config.testLogDir, testID),
-		vms:       vms,
-		networks:  config.networks,
-		variant:   variant,
-		variables: variables,
+		priority:    randomGenerator.Uint64(),
+		outDir:      filepath.Join(config.testLogDir, testID),
+		vms:         vms,
+		networks:    config.networks,
+		sharedDisks: sharedDisks,
+		variant:     variant,
+		variables:   variables,
 	}
 
 	return run
