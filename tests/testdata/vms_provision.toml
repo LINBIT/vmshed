@@ -1,0 +1,5 @@
+name = "mysuite"
+provision_file = "provision.toml"
+
+[[vms]]
+base_image = "testimage"

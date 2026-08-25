@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -50,9 +51,13 @@ var manyTestsToml []byte
 //go:embed testdata/tests_shared_disks.toml
 var sharedDisksTestsToml []byte
 
+//go:embed testdata/vms_provision.toml
+var provisionVmsToml []byte
+
 type vmshedOpts struct {
 	VmsToml       []byte
 	TestsToml     []byte
+	ProvisionToml []byte
 	VirterFailOn  string
 	VirterDelayOn string
 	VirterDelay   string
@@ -133,6 +138,11 @@ func runVmshed(t *testing.T, opts vmshedOpts) vmshedResult {
 
 	runToml := filepath.Join(dir, "run.toml")
 	require.NoError(t, os.WriteFile(runToml, []byte(""), 0644))
+
+	if opts.ProvisionToml != nil {
+		provisionToml := filepath.Join(dir, "provision.toml")
+		require.NoError(t, os.WriteFile(provisionToml, opts.ProvisionToml, 0644))
+	}
 
 	// Create a bin directory with mock virter symlinked as "virter"
 	binDir := filepath.Join(dir, "bin")
@@ -266,6 +276,97 @@ func TestSimpleSuccess(t *testing.T) {
 
 	require.Len(t, res.Results, 1)
 	assert.Equal(t, "SUCCESS", res.Results[0].Status)
+}
+
+func TestProvision(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:       provisionVmsToml,
+		TestsToml:     defaultTestsToml,
+		ProvisionToml: []byte("[[steps]]\n"),
+	})
+
+	require.Equal(t, 1, countSubcommand(res.VirterCalls, "image build"))
+	for _, c := range res.VirterCalls {
+		if c.Subcommand() == "image build" {
+			assert.NotContains(t, c.Args, "--push-to")
+			assert.NotContains(t, c.Args, "--build-id")
+			assert.Equal(t, "testimage-mysuite", c.Args[len(c.Args)-1])
+		}
+	}
+
+	require.Len(t, res.Results, 1)
+	assert.Equal(t, "SUCCESS", res.Results[0].Status)
+}
+
+func TestProvisionWithPushTemplate(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:       provisionVmsToml,
+		TestsToml:     defaultTestsToml,
+		ProvisionToml: []byte("[[steps]]\n"),
+		ExtraArgs:     []string{"--push-template", "registry.example.com/vmshed/{{ .Image }}:latest"},
+	})
+
+	require.Equal(t, 1, countSubcommand(res.VirterCalls, "image build"))
+	for _, c := range res.VirterCalls {
+		if c.Subcommand() != "image build" {
+			continue
+		}
+
+		pushToIndex := slices.Index(c.Args, "--push-to")
+		require.GreaterOrEqual(t, pushToIndex, 0, "image build should push the image")
+		require.Less(t, pushToIndex+1, len(c.Args))
+		assert.Equal(t, "registry.example.com/vmshed/testimage-mysuite:latest", c.Args[pushToIndex+1])
+
+		buildIDIndex := slices.Index(c.Args, "--build-id")
+		require.GreaterOrEqual(t, buildIDIndex, 0, "image build should set a build ID")
+		require.Less(t, buildIDIndex+1, len(c.Args))
+		assert.Regexp(t, "^[0-9a-f]{64}$", c.Args[buildIDIndex+1])
+
+		assert.Equal(t, "testimage-mysuite", c.Args[len(c.Args)-1],
+			"the local image name should not be affected by the push template")
+	}
+
+	require.Len(t, res.Results, 1)
+	assert.Equal(t, "SUCCESS", res.Results[0].Status)
+}
+
+func TestProvisionBuildIDCoverage(t *testing.T) {
+	provisionToml := []byte("version = 1\n\n[values]\nDeclared = \"default\"\n\n[[steps]]\n")
+
+	buildID := func(extraSets ...string) string {
+		t.Helper()
+
+		args := []string{"--push-template", "registry.example.com/vmshed/{{ .Image }}:latest"}
+		for _, set := range extraSets {
+			args = append(args, "--set", set)
+		}
+
+		res := runVmshed(t, vmshedOpts{
+			VmsToml:       provisionVmsToml,
+			TestsToml:     defaultTestsToml,
+			ProvisionToml: provisionToml,
+			ExtraArgs:     args,
+		})
+
+		for _, c := range res.VirterCalls {
+			if c.Subcommand() != "image build" {
+				continue
+			}
+			buildIDIndex := slices.Index(c.Args, "--build-id")
+			require.GreaterOrEqual(t, buildIDIndex, 0)
+			require.Less(t, buildIDIndex+1, len(c.Args))
+			return c.Args[buildIDIndex+1]
+		}
+
+		t.Fatal("no image build call found")
+		return ""
+	}
+
+	base := buildID()
+	assert.Equal(t, base, buildID("values.TestOnly=1"),
+		"overrides of undeclared values should not invalidate the cache")
+	assert.NotEqual(t, base, buildID("values.Declared=changed"),
+		"overrides of declared values should invalidate the cache")
 }
 
 func TestSharedDisks(t *testing.T) {

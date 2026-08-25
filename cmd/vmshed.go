@@ -105,6 +105,7 @@ type testSuiteRun struct {
 	printErrorDetails bool
 	logFormatVirter   string
 	pullImageTemplate *template.Template
+	pushImageTemplate *template.Template
 	timeoutSoft       time.Duration
 	vmRmTimeout       time.Duration
 }
@@ -194,6 +195,7 @@ func rootCommand() *cobra.Command {
 	var firstv4Subnet string
 	var firstv6Subnet string
 	var pullImageTemplate TemplateFlag
+	var pushImageTemplate TemplateFlag
 	var timeoutSoft time.Duration
 	var vmRmTimeout time.Duration
 
@@ -280,6 +282,7 @@ current user.`,
 			suiteRun.firstV6Net = firstV6Net
 			suiteRun.logFormatVirter = logFormatVirter
 			suiteRun.pullImageTemplate = pullImageTemplate.Template
+			suiteRun.pushImageTemplate = pushImageTemplate.Template
 			suiteRun.timeoutSoft = timeoutSoft
 			suiteRun.vmRmTimeout = vmRmTimeout
 
@@ -324,6 +327,7 @@ current user.`,
 	rootCmd.Flags().StringVarP(&firstv4Subnet, "first-subnet", "", "10.224.0.0/24", "The first subnet to use for VMs. If more virtual networks are required, the next higher network of the same size will be used")
 	rootCmd.Flags().StringVarP(&firstv6Subnet, "first-v6-subnet", "", "fd62:a80c:412::/64", "The first ipv6 subnet to use for VMs. If more virtual networks are required, the next higher network of the same size will be used")
 	rootCmd.Flags().VarP(&pullImageTemplate, "pull-template", "", "Where to pull the base images from. Accepts a go template string, allowing usage like 'registry.example.com/vm/{{ .Image }}:latest'")
+	rootCmd.Flags().VarP(&pushImageTemplate, "push-template", "", "Where to push provisioned images to for caching. Accepts a go template string, allowing usage like 'registry.example.com/vmshed/{{ .Image }}:latest'. Later runs reuse the pushed images while the provisioning inputs stay unchanged. Requires push access to the registry")
 	rootCmd.Flags().DurationVar(&timeoutSoft, "timeout-soft", 0, "Soft timeout for the entire test suite. Running tests finish but no new tests start. 0 means disabled.")
 	rootCmd.Flags().DurationVar(&vmRmTimeout, "vm-rm-timeout", 30*time.Second, "Timeout for removing the VMs of a test run")
 	return rootCmd

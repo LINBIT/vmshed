@@ -2,16 +2,22 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"text/template"
 	"time"
 
+	"github.com/BurntSushi/toml"
+	"github.com/helm/helm/pkg/strvals"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -64,15 +70,12 @@ func pullImage(ctx context.Context, suiteRun *testSuiteRun, image string, templ 
 	argv := []string{"virter", "image", "pull", image}
 
 	if templ != nil {
-		var buf strings.Builder
-		err := templ.Execute(&buf, map[string]string{
-			"Image": image,
-		})
+		source, err := executeImageTemplate(templ, image)
 		if err != nil {
 			return err
 		}
 
-		argv = append(argv, buf.String())
+		argv = append(argv, source)
 	}
 
 	cmd := exec.Command(argv[0], argv[1:]...)
@@ -83,6 +86,108 @@ func pullImage(ctx context.Context, suiteRun *testSuiteRun, image string, templ 
 	log.Debugf("EXECUTIONTIME: Pull image %s: %v", image, time.Since(start))
 
 	return err
+}
+
+func executeImageTemplate(templ *template.Template, image string) (string, error) {
+	var buf strings.Builder
+	err := templ.Execute(&buf, map[string]string{
+		"Image": image,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
+}
+
+// declaredProvisionValues returns the keys of the [values] section of the
+// given provisioning file.
+func declaredProvisionValues(provisionFile []byte) (map[string]bool, error) {
+	var parsed struct {
+		Values map[string]string `toml:"values"`
+	}
+	if err := toml.Unmarshal(provisionFile, &parsed); err != nil {
+		return nil, err
+	}
+
+	declared := make(map[string]bool, len(parsed.Values))
+	for key := range parsed.Values {
+		declared[key] = true
+	}
+	return declared, nil
+}
+
+// overrideIsProvisionRelevant reports whether a --set override can change the
+// result of provisioning. An override which only sets values that the
+// provisioning file does not declare is only meaningful to the test phase.
+// Overrides that cannot be analyzed are conservatively treated as relevant.
+func overrideIsProvisionRelevant(override string, declared map[string]bool) bool {
+	// Parse the override like virter does.
+	parsed := map[string]interface{}{}
+	if err := strvals.ParseIntoString(override, parsed); err != nil {
+		return true
+	}
+
+	for topLevel, parsedValue := range parsed {
+		if topLevel != "values" {
+			return true
+		}
+
+		values, ok := parsedValue.(map[string]interface{})
+		if !ok {
+			return true
+		}
+
+		for key := range values {
+			if declared[key] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// provisionBuildID computes the virter build ID for the provisioned image of
+// v. It covers the inputs that determine the provisioning result, so that
+// virter can reuse a matching image pushed by an earlier run. The base image
+// content is checked separately by virter itself. Files referenced by the
+// provisioning file are not covered.
+func provisionBuildID(suiteRun *testSuiteRun, v *vm) (string, error) {
+	provisionFile, err := os.ReadFile(suiteRun.vmSpec.ProvisionFile)
+	if err != nil {
+		return "", err
+	}
+
+	declared, err := declaredProvisionValues(provisionFile)
+	if err != nil {
+		return "", fmt.Errorf("cannot parse provision file %s: %w", suiteRun.vmSpec.ProvisionFile, err)
+	}
+
+	h := sha256.New()
+	component := func(kind string, value string) {
+		fmt.Fprintf(h, "%s:%d:%s\x00", kind, len(value), value)
+	}
+
+	component("provision-file", string(provisionFile))
+	// Overrides are hashed in order because later ones take precedence.
+	// Overrides which cannot affect provisioning are skipped, so that
+	// test-phase overrides like a test filter do not invalidate the cache.
+	for _, override := range suiteRun.overrides {
+		if overrideIsProvisionRelevant(override, declared) {
+			component("set", override)
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(v.Values)) {
+		if !declared[key] {
+			continue
+		}
+		component("value-key", key)
+		component("value", v.Values[key])
+	}
+	component("boot-capacity", suiteRun.vmSpec.ProvisionBootCap)
+	component("user", v.UserName)
+
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, networkName string) error {
@@ -133,6 +238,17 @@ func provisionImage(ctx context.Context, suiteRun *testSuiteRun, nr int, v *vm, 
 	/* Useful for debugging - port defaults to 6000+vm_id */
 	argv = append(argv, "--vnc")
 	argv = append(argv, "--vnc-bind-ip", "0.0.0.0")
+	if suiteRun.pushImageTemplate != nil {
+		pushRef, err := executeImageTemplate(suiteRun.pushImageTemplate, newImageName)
+		if err != nil {
+			return err
+		}
+		buildID, err := provisionBuildID(suiteRun, v)
+		if err != nil {
+			return err
+		}
+		argv = append(argv, "--push-to", pushRef, "--build-id", buildID)
+	}
 	argv = append(argv, v.BaseImage, newImageName)
 
 	stderrPath := filepath.Join(outDir, fmt.Sprintf("%s-provision.log", newImageName))
