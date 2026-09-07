@@ -24,6 +24,8 @@ type test struct {
 	SharedDisks      []sharedDisk      `toml:"shared_disks"`     // Disks attached to all VMs of the test
 	Disks            []string          `toml:"disks"`            // Disks of each VM, replaces the VM specification
 	Variables        map[string]string `toml:"variables"`        // overwrite variables from variants
+	Memory           string            `toml:"memory"`           // overwrite memory of each VM of the test
+	VCPUs            uint              `toml:"vcpus"`            // overwrite vcpus of each VM of the test
 }
 
 type testRun struct {

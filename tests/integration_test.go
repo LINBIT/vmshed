@@ -57,6 +57,9 @@ var disksTestsToml []byte
 //go:embed testdata/vms_disks.toml
 var disksVmsToml []byte
 
+//go:embed testdata/tests_resources.toml
+var resourcesTestsToml []byte
+
 //go:embed testdata/vms_provision.toml
 var provisionVmsToml []byte
 
@@ -286,6 +289,15 @@ func maxConcurrentVMs(calls []virterCall) int {
 	return maxRunning
 }
 
+// consoleTestID returns the test run ID of a "vm run" call, derived from
+// the console directory.
+func consoleTestID(c virterCall) string {
+	if i := slices.Index(c.Args, "--console"); i >= 0 && i+1 < len(c.Args) {
+		return filepath.Base(c.Args[i+1])
+	}
+	return ""
+}
+
 func resultsByName(results []testResult, name string) []testResult {
 	var out []testResult
 	for _, r := range results {
@@ -485,6 +497,35 @@ func TestTestDisks(t *testing.T) {
 
 	require.Len(t, res.Results, 1)
 	assert.Equal(t, "SUCCESS", res.Results[0].Status)
+}
+
+func TestPerTestResources(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:   defaultVmsToml,
+		TestsToml: resourcesTestsToml,
+	})
+
+	require.Len(t, res.Results, 2)
+	for _, r := range res.Results {
+		assert.Equal(t, "SUCCESS", r.Status)
+	}
+
+	vmRuns := map[string][]string{}
+	for _, c := range res.VirterCalls {
+		if c.Subcommand() == "vm run" {
+			vmRuns[consoleTestID(c)] = c.Args
+		}
+	}
+	require.Contains(t, vmRuns, "bigtest-1-default-0")
+	require.Contains(t, vmRuns, "smalltest-1-default-0")
+
+	big := strings.Join(vmRuns["bigtest-1-default-0"], " ")
+	assert.Contains(t, big, "--memory 8G", "the test override should be passed to virter")
+	assert.Contains(t, big, "--vcpus 8")
+
+	small := strings.Join(vmRuns["smalltest-1-default-0"], " ")
+	assert.Contains(t, small, "--memory 4G", "without override the default applies")
+	assert.Contains(t, small, "--vcpus 4")
 }
 
 func TestMaxMemorySerializesTests(t *testing.T) {

@@ -660,9 +660,26 @@ func matchingVMTags(requiredVMTags []string, vms []vm) []vm {
 	return possibleVMs
 }
 
+// applyTestResources returns copies of the VMs with the memory and vcpus
+// overrides of the test applied.
+func applyTestResources(t *test, vms []vm) []vm {
+	applied := make([]vm, len(vms))
+	for i, v := range vms {
+		if t.Memory != "" {
+			v.Memory = t.Memory
+		}
+		if t.VCPUs != 0 {
+			v.VCPUs = t.VCPUs
+		}
+		applied[i] = v
+	}
+	return applied
+}
+
 func newTestRun(randomGenerator *rand.Rand, config *testConfig, variant variant, vms []vm, testIndex int, variables map[string]string) (testRun, error) {
 	testID := testIDString(config.testName, len(vms), variant.Name, testIndex)
 
+	vms = applyTestResources(&config.test, vms)
 	runResources, err := sumVMResources(vms)
 	if err != nil {
 		return testRun{}, fmt.Errorf("test %s: %w", config.testName, err)

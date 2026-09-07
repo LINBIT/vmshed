@@ -60,11 +60,12 @@ vmshed --nvms 12 --max-vcpus 16 --max-memory 48G ...
 ```
 
 The demand of a test run is the sum of the `vcpus` and `memory` of its VMs as
-defined in the VMs specification. VMs without these values count as 4 vCPUs
-and 4G. Provisioning VMs count with `provision_cpus` and `provision_memory`
-from the VMs specification, which default to 1 vCPU and 1G like in virter.
-Memory sizes accept the units of the `--memory` flag of virter, for example
-`512M`, `8G` or `8GiB`.
+defined in the VMs specification. A test can override these values for its VMs
+with the `vcpus` and `memory` keys in the tests specification. VMs without
+these values count as 4 vCPUs and 4G. Provisioning VMs count with
+`provision_cpus` and `provision_memory` from the VMs specification, which
+default to 1 vCPU and 1G like in virter. Memory sizes accept the units of the
+`--memory` flag of virter, for example `512M`, `8G` or `8GiB`.
 
 When `--nvms` is not given along with these flags, the number of VMs does not
 restrict scheduling. vmshed then reserves as many VM IDs as the limits could

@@ -26,6 +26,10 @@ vm_tags = ["podman"]
 
 [tests.test_generic]
 vms = [2]
+# Each VM of this test gets these resources instead of the values from the
+# VMs specification. Used for scheduling with --max-vcpus and --max-memory.
+memory = "2G"
+vcpus = 2
 
 [tests.all_platforms]
 vms = [2]

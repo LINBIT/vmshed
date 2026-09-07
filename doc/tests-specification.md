@@ -89,6 +89,21 @@ Boolean. Run this test once for each available VM base image.
 
 Array of String. Run this test for only these variants.
 
+### `tests.<test_name>.memory`
+
+String. Memory for each VM of this test, for example `"8G"`. Overrides the
+`memory` of the VM in the VMs specification. When neither is set, `4G` is
+used. Accepts the units of the `--memory` flag of virter, such as `512M`,
+`8G` or `8GiB`.
+
+### `tests.<test_name>.vcpus`
+
+Integer. Number of virtual CPUs for each VM of this test. Overrides the
+`vcpus` of the VM in the VMs specification. When neither is set, 4 is used.
+
+These values determine the resource demand of the test for scheduling with
+`--max-vcpus` and `--max-memory`, see the [README](../README.md#resource-limits).
+
 ### `tests.<test_name>.networks`
 
 Array of Table. Additional networks that are added to this test only. See

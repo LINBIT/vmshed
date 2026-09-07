@@ -490,3 +490,63 @@ func TestTestRunResourcesInvalidMemory(t *testing.T) {
 	assert.Contains(t, err.Error(), "broken")
 	assert.Contains(t, err.Error(), "8 gigs")
 }
+
+func TestTestRunResourceOverrides(t *testing.T) {
+	const testSpecToml = `test_suite_file = "run.toml"
+
+	[tests.big]
+	vms = [2]
+	memory = "8G"
+	vcpus = 8
+
+	[tests.small]
+	vms = [1]`
+
+	var vmSpec vmSpecification
+	require.NoError(t, toml.Unmarshal([]byte(vmSpecToml), &vmSpec))
+	var testSpec testSpecification
+	require.NoError(t, toml.Unmarshal([]byte(testSpecToml), &testSpec))
+
+	suiteRun, err := createTestSuiteRun(
+		rand.New(rand.NewSource(12345678)),
+		vmSpec, testSpec, "all", "", 1, nil)
+	require.NoError(t, err)
+
+	runs := map[string]testRun{}
+	for _, run := range suiteRun.testRuns {
+		runs[run.testID] = run
+	}
+	require.Contains(t, runs, "big-2-default-0")
+	require.Contains(t, runs, "small-1-default-0")
+
+	big := runs["big-2-default-0"]
+	assert.Equal(t, resources{vcpus: 16, memory: 16 << 30}, big.resources)
+	for _, v := range big.vms {
+		assert.Equal(t, "8G", v.Memory, "the test override should apply to the VMs of the run")
+		assert.Equal(t, uint(8), v.VCPUs)
+	}
+
+	small := runs["small-1-default-0"]
+	assert.Equal(t, resources{vcpus: 4, memory: 4 << 30}, small.resources, "VMs without values use the defaults")
+	assert.Equal(t, "", small.vms[0].Memory, "a test without override should not change the VM")
+}
+
+func TestTestRunResourceOverridesInvalidMemory(t *testing.T) {
+	const testSpecToml = `test_suite_file = "run.toml"
+
+	[tests.broken]
+	vms = [1]
+	memory = "8 gigs"`
+
+	var vmSpec vmSpecification
+	require.NoError(t, toml.Unmarshal([]byte(vmSpecToml), &vmSpec))
+	var testSpec testSpecification
+	require.NoError(t, toml.Unmarshal([]byte(testSpecToml), &testSpec))
+
+	_, err := createTestSuiteRun(
+		rand.New(rand.NewSource(12345678)),
+		vmSpec, testSpec, "all", "", 1, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "broken")
+	assert.Contains(t, err.Error(), "8 gigs")
+}
