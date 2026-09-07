@@ -37,6 +37,8 @@ type testRun struct {
 	disks       []string
 	variant     variant
 	variables   map[string]string
+	// resources occupied by all VMs of the run, used for scheduling
+	resources resources
 }
 
 type TestStatus string
@@ -92,22 +94,12 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 
 	var vms []vmInstance
 	for i, v := range run.vms {
-		var memory string
-		var vcpus uint
 		var bootCap string
 		var disks []string
 		var userName string
 
-		if v.Memory != "" {
-			memory = v.Memory
-		} else {
-			memory = "4G"
-		}
-		if v.VCPUs != 0 {
-			vcpus = v.VCPUs
-		} else {
-			vcpus = 4
-		}
+		memory := v.effectiveMemory()
+		vcpus := v.effectiveVCPUs()
 		if v.BootCap != "" {
 			bootCap = v.BootCap
 		} else {

@@ -252,14 +252,20 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 		}
 
 		if state.pullStage[v.BaseImage] == pullDone && state.provisionStage[v.ID()] == provisionNone {
+			// Provisioning takes priority over tests, so wait for
+			// resources rather than starting a test instead.
+			if !allResourcesInUse(suiteRun, state).add(suiteRun.provisionResources).fits(suiteRun.resourceLimit) {
+				return nil
+			}
 			return nextActionProvision(suiteRun, state, &suiteRun.vmSpec.VMs[i])
 		}
 	}
 
-	// Ignore IDs which are being used for provisioning when deciding which
-	// test to work towards. This is necessary to ensure that larger tests
-	// are preferred for efficient use of the available IDs.
+	// Ignore IDs and resources which are being used for provisioning when
+	// deciding which test to work towards. This is necessary to ensure that
+	// larger tests are preferred for efficient use of the available IDs.
 	nonTestIDs := countNonTestIDs(suiteRun, state)
+	testResources := testResourcesInUse(suiteRun, state)
 
 	var bestRun *testRun
 
@@ -269,6 +275,10 @@ func chooseNextAction(suiteRun *testSuiteRun, state *suiteState) action {
 		}
 
 		if nonTestIDs < len(run.vms) {
+			continue
+		}
+
+		if !testResources.add(run.resources).fits(suiteRun.resourceLimit) {
 			continue
 		}
 
@@ -396,8 +406,35 @@ func countNonTestIDs(suiteRun *testSuiteRun, state *suiteState) int {
 	return nonTestIDs
 }
 
+// testResourcesInUse returns the resources occupied by the running tests.
+func testResourcesInUse(suiteRun *testSuiteRun, state *suiteState) resources {
+	var used resources
+	for _, run := range suiteRun.testRuns {
+		if state.runStage[run.testID] == runExec {
+			used = used.add(run.resources)
+		}
+	}
+	return used
+}
+
+// allResourcesInUse returns the resources occupied by the running tests and
+// the running provisioning actions.
+func allResourcesInUse(suiteRun *testSuiteRun, state *suiteState) resources {
+	used := testResourcesInUse(suiteRun, state)
+	for _, stage := range state.provisionStage {
+		if stage == provisionExec {
+			used = used.add(suiteRun.provisionResources)
+		}
+	}
+	return used
+}
+
 func nextActionRun(suiteRun *testSuiteRun, state *suiteState, run *testRun) action {
 	if len(state.freeIDs) < len(run.vms) {
+		return nil
+	}
+
+	if !allResourcesInUse(suiteRun, state).add(run.resources).fits(suiteRun.resourceLimit) {
 		return nil
 	}
 
@@ -496,7 +533,7 @@ type performTestAction struct {
 }
 
 func (a *performTestAction) name() string {
-	return fmt.Sprintf("Test %s with IDs %v", a.run.testID, a.ids)
+	return fmt.Sprintf("Test %s with IDs %v (%s)", a.run.testID, a.ids, a.run.resources)
 }
 
 func (a *performTestAction) updatePre(state *suiteState) {

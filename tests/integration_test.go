@@ -69,6 +69,8 @@ type vmshedOpts struct {
 	VirterDelay   string
 	ExtraArgs     []string
 	ExitCode      int
+	// OmitVMCount leaves out the "--nvms 1" argument passed by default.
+	OmitVMCount bool
 }
 
 type virterCall struct {
@@ -161,9 +163,11 @@ func runVmshed(t *testing.T, opts vmshedOpts) vmshedResult {
 		"--vms", vmsToml,
 		"--tests", testsToml,
 		"--out-dir", outDir,
-		"--nvms", "1",
 		"--startvm", "2",
 		"--seed", "1",
+	}
+	if !opts.OmitVMCount {
+		args = append(args, "--nvms", "1")
 	}
 	args = append(args, opts.ExtraArgs...)
 
@@ -259,6 +263,27 @@ func countSubcommand(calls []virterCall, subcmd string) int {
 		}
 	}
 	return n
+}
+
+// maxConcurrentVMs returns the largest number of VMs that were running at
+// the same time, judging by the order of the "vm run" and "vm rm" calls.
+func maxConcurrentVMs(calls []virterCall) int {
+	running := map[string]bool{}
+	maxRunning := 0
+	for _, c := range calls {
+		switch c.Subcommand() {
+		case "vm run":
+			if i := slices.Index(c.Args, "--name"); i >= 0 && i+1 < len(c.Args) {
+				running[c.Args[i+1]] = true
+			}
+		case "vm rm":
+			for _, name := range c.Args[2:] {
+				delete(running, name)
+			}
+		}
+		maxRunning = max(maxRunning, len(running))
+	}
+	return maxRunning
 }
 
 func resultsByName(results []testResult, name string) []testResult {
@@ -460,6 +485,100 @@ func TestTestDisks(t *testing.T) {
 
 	require.Len(t, res.Results, 1)
 	assert.Equal(t, "SUCCESS", res.Results[0].Status)
+}
+
+func TestMaxMemorySerializesTests(t *testing.T) {
+	// Both tests need 4G, so with a limit of 4G they run one after the other
+	// even though the IDs would allow both at once.
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:       defaultVmsToml,
+		TestsToml:     twoTestsToml,
+		VirterDelayOn: "vm exec",
+		VirterDelay:   "1s",
+		ExtraArgs:     []string{"--nvms", "2", "--max-memory", "4G"},
+	})
+
+	require.Len(t, res.Results, 2)
+	for _, r := range res.Results {
+		assert.Equal(t, "SUCCESS", r.Status)
+	}
+	assert.Equal(t, 1, maxConcurrentVMs(res.VirterCalls),
+		"only one 4G test should run at a time with a 4G limit")
+}
+
+func TestMaxMemoryAllowsParallelTests(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:       defaultVmsToml,
+		TestsToml:     twoTestsToml,
+		VirterDelayOn: "vm exec",
+		VirterDelay:   "1s",
+		ExtraArgs:     []string{"--nvms", "2", "--max-memory", "8G", "--max-vcpus", "8"},
+	})
+
+	require.Len(t, res.Results, 2)
+	for _, r := range res.Results {
+		assert.Equal(t, "SUCCESS", r.Status)
+	}
+	assert.Equal(t, 2, maxConcurrentVMs(res.VirterCalls),
+		"two 4G tests should run at once with an 8G limit")
+}
+
+func TestResourceLimitWithoutVMCount(t *testing.T) {
+	// Without --nvms, the resource limit alone decides how many tests run
+	// in parallel. Two 4G VMs fit into 8G, so the access network is created
+	// with two DHCP entries rather than the default of twelve.
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:       defaultVmsToml,
+		TestsToml:     twoTestsToml,
+		VirterDelayOn: "vm exec",
+		VirterDelay:   "1s",
+		ExtraArgs:     []string{"--max-memory", "8G"},
+		OmitVMCount:   true,
+	})
+
+	require.Len(t, res.Results, 2)
+	for _, r := range res.Results {
+		assert.Equal(t, "SUCCESS", r.Status)
+	}
+	assert.Equal(t, 2, maxConcurrentVMs(res.VirterCalls))
+
+	for _, c := range res.VirterCalls {
+		if c.Subcommand() != "network add" {
+			continue
+		}
+		args := strings.Join(c.Args, " ")
+		assert.Contains(t, args, "--dhcp-count 2", "the VM count should be derived from the limit")
+	}
+}
+
+func TestExplicitVMCountWithResourceLimit(t *testing.T) {
+	// An explicit --nvms still applies in addition to the resource limit.
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:       defaultVmsToml,
+		TestsToml:     twoTestsToml,
+		VirterDelayOn: "vm exec",
+		VirterDelay:   "1s",
+		ExtraArgs:     []string{"--nvms", "1", "--max-memory", "8G"},
+		OmitVMCount:   true,
+	})
+
+	require.Len(t, res.Results, 2)
+	assert.Equal(t, 1, maxConcurrentVMs(res.VirterCalls))
+}
+
+func TestMaxMemoryTooSmall(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:   defaultVmsToml,
+		TestsToml: defaultTestsToml,
+		ExtraArgs: []string{"--max-memory", "2G"},
+		ExitCode:  1,
+	})
+
+	assert.Equal(t, 0, countSubcommand(res.VirterCalls, "vm run"),
+		"a test that can never fit the limit should fail before anything runs")
+	assert.Contains(t, res.Stderr, "exceed the limit")
+	assert.Contains(t, res.Stderr, "mytest-1-default-0")
+	assert.Empty(t, res.Results)
 }
 
 func TestMultipleTestsSuccess(t *testing.T) {

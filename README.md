@@ -48,6 +48,32 @@ force a rebuild in this case, or run once without `--push-template`.
 This requires a virter version that supports `image build --push-to`, and push
 access to the registry.
 
+### Resource limits
+
+By default vmshed only limits the number of VMs running in parallel with
+`--nvms`. CI runners often differ in the CPU and memory they have available.
+Pass `--max-vcpus` and `--max-memory` to describe the runner, and vmshed only
+starts a test when the VMs of all running tests stay within these limits:
+
+```
+vmshed --nvms 12 --max-vcpus 16 --max-memory 48G ...
+```
+
+The demand of a test run is the sum of the `vcpus` and `memory` of its VMs as
+defined in the VMs specification. VMs without these values count as 4 vCPUs
+and 4G. Provisioning VMs count with `provision_cpus` and `provision_memory`
+from the VMs specification, which default to 1 vCPU and 1G like in virter.
+Memory sizes accept the units of the `--memory` flag of virter, for example
+`512M`, `8G` or `8GiB`.
+
+When `--nvms` is not given along with these flags, the number of VMs does not
+restrict scheduling. vmshed then reserves as many VM IDs as the limits could
+ever require, instead of the default of 12. An explicit `--nvms` applies in
+addition to the resource limits.
+
+vmshed fails at startup when a test run or provisioning could never fit within
+the limits. Without these flags, CPU and memory are not limited.
+
 ## Tests specification
 
 The tests specification is a TOML file that is provided with the `--tests`

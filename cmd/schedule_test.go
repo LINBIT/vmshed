@@ -56,6 +56,17 @@ func TestChooseNextAction(t *testing.T) {
 		vms:    []vm{vmSameB},
 	}
 
+	// VMs with explicit resource demands for the resource limit cases.
+	vm4G := vm{BaseImage: "b4g", Memory: "4G", VCPUs: 2}
+	vm2GA := vm{BaseImage: "b2ga", Memory: "2G", VCPUs: 1}
+	vm2GB := vm{BaseImage: "b2gb", Memory: "2G", VCPUs: 1}
+
+	testRun4GFirst := resourceTestRun("t4GFirst", vm4G)
+	testRun4GSecond := resourceTestRun("t4GSecond", vm4G)
+	testRun2GA := resourceTestRun("t2GA", vm2GA)
+	testRun2GB := resourceTestRun("t2GB", vm2GB)
+	testRun2GAOther := resourceTestRun("t2GAOther", vm2GA)
+
 	type step struct {
 		result action
 		// an expected action that is nil indicates that we expect the run to be stopping
@@ -273,6 +284,112 @@ func TestChooseNextAction(t *testing.T) {
 		},
 	}
 
+	resourceTestCases := []struct {
+		name     string
+		suiteRun testSuiteRun
+		sequence []step
+	}{
+		{
+			// Both tests fit the IDs, but only one fits the memory limit.
+			name: "memory-limit",
+			suiteRun: testSuiteRun{
+				vmSpec:        &vmSpecification{VMs: []vm{vm4G}},
+				testRuns:      []testRun{testRun4GFirst, testRun4GSecond},
+				startVM:       5,
+				nrVMs:         2,
+				resourceLimit: resources{memory: 4 << 30},
+				firstV4Net:    baseNet,
+			},
+			sequence: []step{
+				{
+					expected: []action{accessNetworkAction(networkName0)},
+				},
+				{
+					result:   accessNetworkAction(networkName0),
+					expected: []action{&performTestAction{run: &testRun4GFirst, ids: []int{5}, networkNames: networkNames0}},
+					// the second test does not fit next to the first one
+				},
+				{
+					result:   &performTestAction{run: &testRun4GFirst, ids: []int{5}, networkNames: networkNames0},
+					expected: []action{&performTestAction{run: &testRun4GSecond, ids: []int{5}, networkNames: networkNames0}},
+				},
+			},
+		},
+		{
+			// Three tests fit the IDs, but only two fit the vCPU limit.
+			name: "vcpu-limit",
+			suiteRun: testSuiteRun{
+				vmSpec:        &vmSpecification{VMs: []vm{vm2GA, vm2GB}},
+				testRuns:      []testRun{testRun2GA, testRun2GB, testRun2GAOther},
+				startVM:       5,
+				nrVMs:         3,
+				resourceLimit: resources{vcpus: 2},
+				firstV4Net:    baseNet,
+			},
+			sequence: []step{
+				{
+					expected: []action{accessNetworkAction(networkName0)},
+				},
+				{
+					result: accessNetworkAction(networkName0),
+					expected: []action{
+						&performTestAction{run: &testRun2GA, ids: []int{5}, networkNames: networkNames0},
+						accessNetworkAction(networkName1),
+					},
+				},
+				{
+					result:   accessNetworkAction(networkName1),
+					expected: []action{&performTestAction{run: &testRun2GB, ids: []int{6}, networkNames: networkNames1}},
+					// the third test does not fit next to the other two
+				},
+				{
+					result:   &performTestAction{run: &testRun2GA, ids: []int{5}, networkNames: networkNames0},
+					expected: []action{&performTestAction{run: &testRun2GAOther, ids: []int{5}, networkNames: networkNames0}},
+				},
+			},
+		},
+		{
+			// Provisioning VMs occupy resources too. With a limit of 3G,
+			// provisioning (2G each) runs one at a time, and a test (2G)
+			// has to wait for provisioning to finish.
+			name: "provision-resources",
+			suiteRun: testSuiteRun{
+				vmSpec:             &vmSpecification{ProvisionFile: "/p", VMs: []vm{vm2GA, vm2GB}},
+				testRuns:           []testRun{testRun2GA, testRun2GB},
+				startVM:            5,
+				nrVMs:              2,
+				provisionResources: resources{vcpus: 1, memory: 2 << 30},
+				resourceLimit:      resources{memory: 3 << 30},
+				firstV4Net:         baseNet,
+			},
+			sequence: []step{
+				{
+					expected: []action{accessNetworkAction(networkName0)},
+				},
+				{
+					result:   accessNetworkAction(networkName0),
+					expected: []action{&provisionImageAction{v: &vm2GA, id: 5, networkName: networkName0}},
+					// provisioning vm2GB does not fit next to provisioning vm2GA
+				},
+				{
+					result:   &provisionImageAction{v: &vm2GA, id: 5, networkName: networkName0},
+					expected: []action{&provisionImageAction{v: &vm2GB, id: 5, networkName: networkName0}},
+					// testRun2GA is ready, but does not fit next to provisioning vm2GB
+				},
+				{
+					result:   &provisionImageAction{v: &vm2GB, id: 5, networkName: networkName0},
+					expected: []action{&performTestAction{run: &testRun2GA, ids: []int{5}, networkNames: networkNames0}},
+					// testRun2GB does not fit next to testRun2GA
+				},
+				{
+					result:   &performTestAction{run: &testRun2GA, ids: []int{5}, networkNames: networkNames0},
+					expected: []action{&performTestAction{run: &testRun2GB, ids: []int{5}, networkNames: networkNames0}},
+				},
+			},
+		},
+	}
+	testCases = append(testCases, resourceTestCases...)
+
 	for _, test := range testCases {
 		t.Run(test.name, func(t *testing.T) {
 			state := initializeState(&test.suiteRun)
@@ -383,4 +500,13 @@ func validateAction(t *testing.T, a, e action) {
 
 func accessNetworkAction(name string) action {
 	return &addNetworkAction{networkName: name, network: accessNetwork(false)}
+}
+
+// resourceTestRun creates a test run with the resources of its VMs.
+func resourceTestRun(testID string, vms ...vm) testRun {
+	res, err := sumVMResources(vms)
+	if err != nil {
+		panic(err)
+	}
+	return testRun{testID: testID, vms: vms, resources: res}
 }

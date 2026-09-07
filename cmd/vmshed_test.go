@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -421,4 +422,71 @@ func TestFilterVMs(t *testing.T) {
 			require.Equal(t, c.want, got)
 		})
 	}
+}
+
+func TestTestRunResources(t *testing.T) {
+	const resourceVMSpecToml = `name = "t"
+	provision_file = "provision-test.toml"
+	provision_memory = "2G"
+	provision_cpus = 2
+
+	[[vms]]
+	base_image = "big"
+	memory = "8G"
+	vcpus = 8
+
+	[[vms]]
+	base_image = "small"`
+
+	const testSpecToml = `test_suite_file = "run.toml"
+
+	[tests.platforms]
+	vms = [2]
+	needallplatforms = true`
+
+	var vmSpec vmSpecification
+	require.NoError(t, toml.Unmarshal([]byte(resourceVMSpecToml), &vmSpec))
+	var testSpec testSpecification
+	require.NoError(t, toml.Unmarshal([]byte(testSpecToml), &testSpec))
+
+	suiteRun, err := createTestSuiteRun(
+		rand.New(rand.NewSource(12345678)),
+		vmSpec, testSpec, "all", "", 1, nil)
+	require.NoError(t, err)
+
+	byImage := map[string]testRun{}
+	for _, run := range suiteRun.testRuns {
+		byImage[run.vms[0].BaseImage] = run
+	}
+	require.Contains(t, byImage, "big")
+	require.Contains(t, byImage, "small")
+
+	assert.Equal(t, resources{vcpus: 16, memory: 16 << 30}, byImage["big"].resources,
+		"two VMs with explicit values")
+	assert.Equal(t, resources{vcpus: 8, memory: 8 << 30}, byImage["small"].resources,
+		"two VMs with default values")
+	assert.Equal(t, resources{vcpus: 2, memory: 2 << 30}, suiteRun.provisionResources)
+}
+
+func TestTestRunResourcesInvalidMemory(t *testing.T) {
+	const brokenVMSpecToml = `[[vms]]
+	base_image = "broken"
+	memory = "8 gigs"`
+
+	const testSpecToml = `test_suite_file = "run.toml"
+
+	[tests.mytest]
+	vms = [1]`
+
+	var vmSpec vmSpecification
+	require.NoError(t, toml.Unmarshal([]byte(brokenVMSpecToml), &vmSpec))
+	var testSpec testSpecification
+	require.NoError(t, toml.Unmarshal([]byte(testSpecToml), &testSpec))
+
+	_, err := createTestSuiteRun(
+		rand.New(rand.NewSource(12345678)),
+		vmSpec, testSpec, "all", "", 1, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "broken")
+	assert.Contains(t, err.Error(), "8 gigs")
 }

@@ -92,22 +92,24 @@ const (
 )
 
 type testSuiteRun struct {
-	vmSpec            *vmSpecification
-	testSpec          *testSpecification
-	overrides         []string
-	outDir            string
-	testRuns          []testRun
-	startVM           int
-	nrVMs             int
-	firstV4Net        *net.IPNet
-	firstV6Net        *net.IPNet
-	onFailure         FailurePolicy
-	printErrorDetails bool
-	logFormatVirter   string
-	pullImageTemplate *template.Template
-	pushImageTemplate *template.Template
-	timeoutSoft       time.Duration
-	vmRmTimeout       time.Duration
+	vmSpec             *vmSpecification
+	testSpec           *testSpecification
+	overrides          []string
+	outDir             string
+	testRuns           []testRun
+	startVM            int
+	nrVMs              int
+	resourceLimit      resources // zero values mean unlimited
+	provisionResources resources
+	firstV4Net         *net.IPNet
+	firstV6Net         *net.IPNet
+	onFailure          FailurePolicy
+	printErrorDetails  bool
+	logFormatVirter    string
+	pullImageTemplate  *template.Template
+	pushImageTemplate  *template.Template
+	timeoutSoft        time.Duration
+	vmRmTimeout        time.Duration
 }
 
 func (f *FailurePolicy) String() string {
@@ -185,6 +187,8 @@ func rootCommand() *cobra.Command {
 	var repeats int
 	var startVM int
 	var nrVMs int
+	var maxVCPUs uint
+	var maxMemory memoryFlag
 	var onFailure FailurePolicy = OnFailureContinue
 	var quiet bool
 	var logFormatVirter string
@@ -276,6 +280,7 @@ current user.`,
 			suiteRun.overrides = provisionOverrides
 			suiteRun.startVM = startVM
 			suiteRun.nrVMs = nrVMs
+			suiteRun.resourceLimit = resources{vcpus: maxVCPUs, memory: uint64(maxMemory)}
 			suiteRun.onFailure = onFailure
 			suiteRun.printErrorDetails = errorDetails
 			suiteRun.firstV4Net = firstV4Net
@@ -285,6 +290,19 @@ current user.`,
 			suiteRun.pushImageTemplate = pushImageTemplate.Template
 			suiteRun.timeoutSoft = timeoutSoft
 			suiteRun.vmRmTimeout = vmRmTimeout
+
+			if suiteRun.resourceLimit.isLimited() {
+				log.Infof("Resource limit: %s", suiteRun.resourceLimit.limitString())
+			}
+			if err := checkResourceLimit(&suiteRun); err != nil {
+				log.Fatal(err)
+			}
+			if suiteRun.resourceLimit.isLimited() && !cmd.Flags().Changed("nvms") {
+				// Only the resource limit should restrict scheduling, so
+				// use as many VM IDs as the limit could ever require.
+				suiteRun.nrVMs = maxVMsWithinLimit(&suiteRun)
+				log.Infof("Using up to %d VMs in parallel as allowed by the resource limit", suiteRun.nrVMs)
+			}
 
 			ctx, cancel := signal.NotifyContext(context.Background(), unix.SIGINT, unix.SIGTERM)
 			defer cancel()
@@ -315,7 +333,9 @@ current user.`,
 	rootCmd.Flags().StringVarP(&toRun, "torun", "", "all", "comma separated list of test names to execute ('all' is a reserved test name)")
 	rootCmd.Flags().IntVarP(&repeats, "repeats", "", 1, "number of times to repeat each test, expecting success on every attempt")
 	rootCmd.Flags().IntVarP(&startVM, "startvm", "", 2, "Number of the first VM to start in parallel")
-	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm")
+	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm. When not set but --max-vcpus or --max-memory is, as many VMs as the limit allows")
+	rootCmd.Flags().UintVar(&maxVCPUs, "max-vcpus", 0, "Maximum total number of vCPUs of the VMs running in parallel. 0 means unlimited")
+	rootCmd.Flags().Var(&maxMemory, "max-memory", "Maximum total memory of the VMs running in parallel, for example '64G'. Unset means unlimited")
 	rootCmd.Flags().VarP(&onFailure, "on-failure", "", "What to do if a test fails: continue|terminate|keep-vms")
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "", false, "Don't print progess messages while tests are running")
 	rootCmd.Flags().StringVar(&logFormatVirter, "virter-log-format", "", "Log format that is passed to virter on vm exec")
@@ -377,9 +397,14 @@ func createTestSuiteRun(
 	testLogDir := filepath.Join(outDir, "log")
 	testRuns, err := determineAllTestRuns(randomGenerator, testLogDir, &vmSpec, &testSpec, repeats)
 	if err != nil {
-		log.Fatal(err)
+		return testSuiteRun{}, err
 	}
 	vmSpec.VMs = removeUnusedVMs(vmSpec.VMs, testRuns)
+
+	provisionRes, err := provisionResources(&vmSpec)
+	if err != nil {
+		return testSuiteRun{}, err
+	}
 
 	for _, run := range testRuns {
 		images := make([]string, len(run.vms))
@@ -387,17 +412,42 @@ func createTestSuiteRun(
 			images[i] = v.ID()
 		}
 		imageString := strings.Join(images, ",")
-		log.Infof("PLAN: %s on %s", run.testID, imageString)
+		log.Infof("PLAN: %s on %s (%s)", run.testID, imageString, run.resources)
 	}
 
 	suiteRun := testSuiteRun{
-		vmSpec:   &vmSpec,
-		testSpec: &testSpec,
-		outDir:   outDir,
-		testRuns: testRuns,
+		vmSpec:             &vmSpec,
+		testSpec:           &testSpec,
+		outDir:             outDir,
+		testRuns:           testRuns,
+		provisionResources: provisionRes,
 	}
 
 	return suiteRun, nil
+}
+
+// checkResourceLimit returns an error when provisioning or a test run
+// requires more resources than the limit allows, as it could never start.
+func checkResourceLimit(suiteRun *testSuiteRun) error {
+	limit := suiteRun.resourceLimit
+
+	if suiteRun.vmSpec.ProvisionFile != "" && !suiteRun.provisionResources.fits(limit) {
+		return fmt.Errorf("provisioning requires %s, exceeding the limit of %s",
+			suiteRun.provisionResources, limit.limitString())
+	}
+
+	var tooLarge []string
+	for _, run := range suiteRun.testRuns {
+		if !run.resources.fits(limit) {
+			tooLarge = append(tooLarge, fmt.Sprintf("%s (%s)", run.testID, run.resources))
+		}
+	}
+	if len(tooLarge) > 0 {
+		return fmt.Errorf("test run(s) exceed the limit of %s: %s",
+			limit.limitString(), strings.Join(tooLarge, ", "))
+	}
+
+	return nil
 }
 
 func printSummaryTable(suiteRun testSuiteRun, results map[string]testResult) int {
@@ -528,16 +578,24 @@ func determineRunsForTestVariant(randomGenerator *rand.Rand, config *testConfig,
 	for repeatCounter := 0; repeatCounter < config.repeats; repeatCounter++ {
 		if config.test.NeedAllPlatforms {
 			for _, v := range availableVMs {
-				testRuns = append(testRuns, newTestRun(
-					randomGenerator, config, testVariant, repeatVM(v, vmCount), len(testRuns), config.test.Variables))
+				run, err := newTestRun(
+					randomGenerator, config, testVariant, repeatVM(v, vmCount), len(testRuns), config.test.Variables)
+				if err != nil {
+					return nil, err
+				}
+				testRuns = append(testRuns, run)
 			}
 		} else if config.test.SameVMs {
 			v, err := randomVM(randomGenerator, availableVMs)
 			if err != nil {
 				return nil, err
 			}
-			testRuns = append(testRuns, newTestRun(
-				randomGenerator, config, testVariant, repeatVM(v, vmCount), len(testRuns), config.test.Variables))
+			run, err := newTestRun(
+				randomGenerator, config, testVariant, repeatVM(v, vmCount), len(testRuns), config.test.Variables)
+			if err != nil {
+				return nil, err
+			}
+			testRuns = append(testRuns, run)
 		} else {
 			var vms []vm
 			for i := 0; i < vmCount; i++ {
@@ -547,8 +605,12 @@ func determineRunsForTestVariant(randomGenerator *rand.Rand, config *testConfig,
 				}
 				vms = append(vms, v)
 			}
-			testRuns = append(testRuns, newTestRun(
-				randomGenerator, config, testVariant, vms, len(testRuns), config.test.Variables))
+			run, err := newTestRun(
+				randomGenerator, config, testVariant, vms, len(testRuns), config.test.Variables)
+			if err != nil {
+				return nil, err
+			}
+			testRuns = append(testRuns, run)
 		}
 	}
 
@@ -598,8 +660,13 @@ func matchingVMTags(requiredVMTags []string, vms []vm) []vm {
 	return possibleVMs
 }
 
-func newTestRun(randomGenerator *rand.Rand, config *testConfig, variant variant, vms []vm, testIndex int, variables map[string]string) testRun {
+func newTestRun(randomGenerator *rand.Rand, config *testConfig, variant variant, vms []vm, testIndex int, variables map[string]string) (testRun, error) {
 	testID := testIDString(config.testName, len(vms), variant.Name, testIndex)
+
+	runResources, err := sumVMResources(vms)
+	if err != nil {
+		return testRun{}, fmt.Errorf("test %s: %w", config.testName, err)
+	}
 
 	var sharedDisks []sharedDiskInstance
 	for _, d := range config.test.SharedDisks {
@@ -622,9 +689,10 @@ func newTestRun(randomGenerator *rand.Rand, config *testConfig, variant variant,
 		disks:       config.test.Disks,
 		variant:     variant,
 		variables:   variables,
+		resources:   runResources,
 	}
 
-	return run
+	return run, nil
 }
 
 func provisionAndExec(ctx context.Context, suiteRun *testSuiteRun) (map[string]testResult, error) {
