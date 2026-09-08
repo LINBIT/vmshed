@@ -281,6 +281,17 @@ current user.`,
 			suiteRun.startVM = startVM
 			suiteRun.nrVMs = nrVMs
 			suiteRun.resourceLimit = resources{vcpus: maxVCPUs, memory: uint64(maxMemory)}
+			if !cmd.Flags().Changed("max-vcpus") {
+				suiteRun.resourceLimit.vcpus = hostCPUs()
+			}
+			if !cmd.Flags().Changed("max-memory") {
+				memory, err := hostMemory()
+				if err != nil {
+					log.Warnf("Could not discover the memory of the host, memory is not limited: %v", err)
+				} else {
+					suiteRun.resourceLimit.memory = memory
+				}
+			}
 			suiteRun.onFailure = onFailure
 			suiteRun.printErrorDetails = errorDetails
 			suiteRun.firstV4Net = firstV4Net
@@ -291,11 +302,9 @@ current user.`,
 			suiteRun.timeoutSoft = timeoutSoft
 			suiteRun.vmRmTimeout = vmRmTimeout
 
-			if suiteRun.resourceLimit.isLimited() {
-				log.Infof("Resource limit: %s", suiteRun.resourceLimit.limitString())
-			}
+			log.Infof("Resource limit: %s", suiteRun.resourceLimit.limitString())
 			if err := checkResourceLimit(&suiteRun); err != nil {
-				log.Fatal(err)
+				log.Fatalf("%v (adjust with --max-vcpus and --max-memory, 0 disables a limit)", err)
 			}
 			if suiteRun.resourceLimit.isLimited() && !cmd.Flags().Changed("nvms") {
 				// Only the resource limit should restrict scheduling, so
@@ -333,9 +342,9 @@ current user.`,
 	rootCmd.Flags().StringVarP(&toRun, "torun", "", "all", "comma separated list of test names to execute ('all' is a reserved test name)")
 	rootCmd.Flags().IntVarP(&repeats, "repeats", "", 1, "number of times to repeat each test, expecting success on every attempt")
 	rootCmd.Flags().IntVarP(&startVM, "startvm", "", 2, "Number of the first VM to start in parallel")
-	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm. When not set but --max-vcpus or --max-memory is, as many VMs as the limit allows")
-	rootCmd.Flags().UintVar(&maxVCPUs, "max-vcpus", 0, "Maximum total number of vCPUs of the VMs running in parallel. 0 means unlimited")
-	rootCmd.Flags().Var(&maxMemory, "max-memory", "Maximum total memory of the VMs running in parallel, for example '64G'. Unset means unlimited")
+	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm. When not set, as many VMs as --max-vcpus and --max-memory allow; the default only applies with both limits disabled")
+	rootCmd.Flags().UintVar(&maxVCPUs, "max-vcpus", 0, "Maximum total number of vCPUs of the VMs running in parallel. Defaults to the CPUs of the host, 0 means unlimited")
+	rootCmd.Flags().Var(&maxMemory, "max-memory", "Maximum total memory of the VMs running in parallel, for example '64G'. Defaults to the memory of the host, 0 means unlimited")
 	rootCmd.Flags().VarP(&onFailure, "on-failure", "", "What to do if a test fails: continue|terminate|keep-vms")
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "", false, "Don't print progess messages while tests are running")
 	rootCmd.Flags().StringVar(&logFormatVirter, "virter-log-format", "", "Log format that is passed to virter on vm exec")

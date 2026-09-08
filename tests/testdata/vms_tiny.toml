@@ -1,0 +1,4 @@
+[[vms]]
+base_image = "testimage"
+memory = "64M"
+vcpus = 1

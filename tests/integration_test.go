@@ -63,6 +63,9 @@ var resourcesTestsToml []byte
 //go:embed testdata/vms_provision.toml
 var provisionVmsToml []byte
 
+//go:embed testdata/vms_tiny.toml
+var tinyVmsToml []byte
+
 type vmshedOpts struct {
 	VmsToml       []byte
 	TestsToml     []byte
@@ -74,6 +77,9 @@ type vmshedOpts struct {
 	ExitCode      int
 	// OmitVMCount leaves out the "--nvms 1" argument passed by default.
 	OmitVMCount bool
+	// OmitResourceLimits leaves out the "--max-vcpus 0 --max-memory 0"
+	// arguments passed by default, so the host resources apply.
+	OmitResourceLimits bool
 }
 
 type virterCall struct {
@@ -171,6 +177,10 @@ func runVmshed(t *testing.T, opts vmshedOpts) vmshedResult {
 	}
 	if !opts.OmitVMCount {
 		args = append(args, "--nvms", "1")
+	}
+	if !opts.OmitResourceLimits {
+		// Explicit limits in ExtraArgs take precedence over these.
+		args = append(args, "--max-vcpus", "0", "--max-memory", "0")
 	}
 	args = append(args, opts.ExtraArgs...)
 
@@ -605,6 +615,21 @@ func TestExplicitVMCountWithResourceLimit(t *testing.T) {
 
 	require.Len(t, res.Results, 2)
 	assert.Equal(t, 1, maxConcurrentVMs(res.VirterCalls))
+}
+
+func TestResourceLimitDefaultsToHost(t *testing.T) {
+	// Without explicit limits, the CPUs and memory of the host apply. A
+	// tiny VM fits on any host, so the test runs and the limits are logged.
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:            tinyVmsToml,
+		TestsToml:          defaultTestsToml,
+		OmitResourceLimits: true,
+	})
+
+	require.Len(t, res.Results, 1)
+	assert.Equal(t, "SUCCESS", res.Results[0].Status)
+	assert.Regexp(t, `Resource limit: [0-9]+ vCPUs, [0-9]+[BKMGTPE] memory`, res.Stderr,
+		"both limits should be discovered from the host")
 }
 
 func TestMaxMemoryTooSmall(t *testing.T) {

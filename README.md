@@ -50,13 +50,16 @@ access to the registry.
 
 ### Resource limits
 
-By default vmshed only limits the number of VMs running in parallel with
-`--nvms`. CI runners often differ in the CPU and memory they have available.
-Pass `--max-vcpus` and `--max-memory` to describe the runner, and vmshed only
-starts a test when the VMs of all running tests stay within these limits:
+vmshed only starts a test when the VMs of all running tests stay within the
+CPU and memory limits. The limits default to the CPUs and memory discovered on
+the host, so the parallelism adapts to each CI runner. Discovery sees the whole
+machine, so limits imposed on a container by cgroups are not taken into
+account. Pass `--max-vcpus` and `--max-memory` to set the limits explicitly,
+for example in such a container, to leave headroom for the host or to
+oversubscribe CPUs. A value of `0` disables a limit:
 
 ```
-vmshed --nvms 12 --max-vcpus 16 --max-memory 48G ...
+vmshed --max-vcpus 0 --max-memory 48G ...
 ```
 
 The demand of a test run is the sum of the `vcpus` and `memory` of its VMs as
@@ -67,13 +70,13 @@ these values count as 4 vCPUs and 4G. Provisioning VMs count with
 default to 1 vCPU and 1G like in virter. Memory sizes accept the units of the
 `--memory` flag of virter, for example `512M`, `8G` or `8GiB`.
 
-When `--nvms` is not given along with these flags, the number of VMs does not
-restrict scheduling. vmshed then reserves as many VM IDs as the limits could
-ever require, instead of the default of 12. An explicit `--nvms` applies in
-addition to the resource limits.
+When `--nvms` is not given, the number of VMs does not restrict scheduling.
+vmshed then reserves as many VM IDs as the limits could ever require. An
+explicit `--nvms` applies in addition to the resource limits. Its default of 12
+only applies when both limits are disabled.
 
 vmshed fails at startup when a test run or provisioning could never fit within
-the limits. Without these flags, CPU and memory are not limited.
+the limits.
 
 ## Tests specification
 

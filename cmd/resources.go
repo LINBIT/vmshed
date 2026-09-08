@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"runtime"
 
 	"github.com/rck/unit"
 )
@@ -68,6 +69,12 @@ func (r resources) limitString() string {
 // isLimited reports whether at least one dimension of the limit is set.
 func (r resources) isLimited() bool {
 	return r.vcpus != 0 || r.memory != 0
+}
+
+// hostCPUs returns the CPUs of the host as the default vCPU limit. Quotas
+// imposed by cgroups, for example on a container, are not taken into account.
+func hostCPUs() uint {
+	return uint(runtime.NumCPU())
 }
 
 // memoryUnit parses the same sizes as the --memory flag of virter: the
