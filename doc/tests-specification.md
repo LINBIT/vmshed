@@ -94,6 +94,13 @@ Array of String. Run this test for only these variants.
 Array of Table. Additional networks that are added to this test only. See
 [`networks`](#networks-array-of-table) for a description of the keys.
 
+### `tests.<test_name>.disks`
+
+Array of String. Disks that are attached to each VM of the test. Each entry is
+passed to `virter vm run --disk`, for example `"name=data,size=10G,bus=scsi"`.
+When set, this replaces the `disks` of the VM specification and the default
+disk for all runs of this test.
+
 ### `tests.<test_name>.shared_disks`
 
 Array of Table. Disks that are attached to all VMs of the test at the same

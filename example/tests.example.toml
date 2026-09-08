@@ -46,3 +46,7 @@ vms = [2]
 name = "shared0"
 size = "1G"
 bus = "scsi"
+
+[tests.big_disk]
+vms = [1]
+disks = ["name=data,size=20G,bus=scsi", "name=meta,size=1G"]

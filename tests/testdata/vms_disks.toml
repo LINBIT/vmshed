@@ -1,0 +1,3 @@
+[[vms]]
+base_image = "testimage"
+disks = ["name=data,size=5G"]

@@ -51,6 +51,12 @@ var manyTestsToml []byte
 //go:embed testdata/tests_shared_disks.toml
 var sharedDisksTestsToml []byte
 
+//go:embed testdata/tests_disks.toml
+var disksTestsToml []byte
+
+//go:embed testdata/vms_disks.toml
+var disksVmsToml []byte
+
 //go:embed testdata/vms_provision.toml
 var provisionVmsToml []byte
 
@@ -407,6 +413,53 @@ func TestSharedDiskCreateFail(t *testing.T) {
 
 	require.Len(t, res.Results, 1)
 	assert.Equal(t, "ERROR", res.Results[0].Status)
+}
+
+// vmRunDisks returns the values of all "--disk" arguments of "vm run" calls.
+func vmRunDisks(calls []virterCall) []string {
+	var disks []string
+	for _, c := range calls {
+		if c.Subcommand() != "vm run" {
+			continue
+		}
+		for i, arg := range c.Args {
+			if arg == "--disk" && i+1 < len(c.Args) {
+				disks = append(disks, c.Args[i+1])
+			}
+		}
+	}
+	return disks
+}
+
+func TestDefaultDisk(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:   defaultVmsToml,
+		TestsToml: defaultTestsToml,
+	})
+
+	assert.Equal(t, []string{"name=data,size=2G,bus=scsi"}, vmRunDisks(res.VirterCalls))
+}
+
+func TestVMDisks(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:   disksVmsToml,
+		TestsToml: defaultTestsToml,
+	})
+
+	assert.Equal(t, []string{"name=data,size=5G"}, vmRunDisks(res.VirterCalls))
+}
+
+func TestTestDisks(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:   disksVmsToml,
+		TestsToml: disksTestsToml,
+	})
+
+	// The disks of the test replace the disks of the VM specification.
+	assert.Equal(t, []string{"name=data,size=10G,bus=scsi", "name=meta,size=1G"}, vmRunDisks(res.VirterCalls))
+
+	require.Len(t, res.Results, 1)
+	assert.Equal(t, "SUCCESS", res.Results[0].Status)
 }
 
 func TestMultipleTestsSuccess(t *testing.T) {

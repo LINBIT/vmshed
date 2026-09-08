@@ -619,6 +619,7 @@ func newTestRun(randomGenerator *rand.Rand, config *testConfig, variant variant,
 		vms:         vms,
 		networks:    config.networks,
 		sharedDisks: sharedDisks,
+		disks:       config.test.Disks,
 		variant:     variant,
 		variables:   variables,
 	}

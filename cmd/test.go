@@ -22,6 +22,7 @@ type test struct {
 	Variants         []string          `toml:"variants"`         // only run on given variants, if empty all
 	Networks         []virterNet       `toml:"networks"`         // Extra NIC to add to the VMs
 	SharedDisks      []sharedDisk      `toml:"shared_disks"`     // Disks attached to all VMs of the test
+	Disks            []string          `toml:"disks"`            // Disks of each VM, replaces the VM specification
 	Variables        map[string]string `toml:"variables"`        // overwrite variables from variants
 }
 
@@ -33,6 +34,7 @@ type testRun struct {
 	vms         []vm
 	networks    []virterNet
 	sharedDisks []sharedDiskInstance
+	disks       []string
 	variant     variant
 	variables   map[string]string
 }
@@ -111,7 +113,9 @@ func performTest(ctx context.Context, suiteRun *testSuiteRun, run *testRun, ids 
 		} else {
 			bootCap = "10G"
 		}
-		if len(v.Disks) > 0 {
+		if len(run.disks) > 0 {
+			disks = run.disks
+		} else if len(v.Disks) > 0 {
 			disks = v.Disks
 		} else {
 			disks = []string{"name=data,size=2G,bus=scsi"}
