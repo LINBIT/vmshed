@@ -172,6 +172,36 @@ func TestCheckResourceLimit(t *testing.T) {
 	assert.Contains(t, err.Error(), "large-2-default-0")
 }
 
+func TestAddVMMemoryOverhead(t *testing.T) {
+	suiteRun := &testSuiteRun{
+		testRuns: []testRun{
+			{vms: []vm{{BaseImage: "a"}}, resources: resources{vcpus: 2, memory: 2 << 30}},
+			{vms: []vm{{BaseImage: "a"}, {BaseImage: "a"}}, resources: resources{vcpus: 4, memory: 4 << 30}},
+		},
+		provisionResources: resources{vcpus: 1, memory: 1 << 30},
+	}
+
+	addVMMemoryOverhead(suiteRun, 256<<20)
+
+	assert.Equal(t, resources{vcpus: 2, memory: 2<<30 + 256<<20}, suiteRun.testRuns[0].resources)
+	assert.Equal(t, resources{vcpus: 4, memory: 4<<30 + 512<<20}, suiteRun.testRuns[1].resources,
+		"the overhead applies to each VM of a test run")
+	assert.Equal(t, resources{vcpus: 1, memory: 1<<30 + 256<<20}, suiteRun.provisionResources)
+}
+
+func TestReserveMemory(t *testing.T) {
+	limit, err := reserveMemory(resources{vcpus: 8, memory: 16 << 30}, 4<<30)
+	require.NoError(t, err)
+	assert.Equal(t, resources{vcpus: 8, memory: 12 << 30}, limit)
+
+	limit, err = reserveMemory(resources{vcpus: 8}, 4<<30)
+	require.NoError(t, err)
+	assert.Equal(t, resources{vcpus: 8}, limit, "unlimited memory stays unlimited")
+
+	_, err = reserveMemory(resources{memory: 4 << 30}, 4<<30)
+	assert.Error(t, err, "reserving all memory leaves nothing for the VMs")
+}
+
 func TestMaxVMsWithinLimit(t *testing.T) {
 	_, slash24, err := net.ParseCIDR("10.224.0.0/24")
 	require.NoError(t, err)

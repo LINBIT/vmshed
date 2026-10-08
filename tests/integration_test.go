@@ -574,6 +574,30 @@ func TestMaxMemoryAllowsParallelTests(t *testing.T) {
 		"two 4G tests should run at once with an 8G limit")
 }
 
+func TestMemoryOverheadSerializesTests(t *testing.T) {
+	// Two 4G tests would fit into 9G, but not with 1G overhead per VM, nor
+	// with 2G of the limit reserved.
+	for _, extraArgs := range [][]string{
+		{"--vm-memory-overhead", "1G"},
+		{"--reserved-memory", "2G"},
+	} {
+		res := runVmshed(t, vmshedOpts{
+			VmsToml:       defaultVmsToml,
+			TestsToml:     twoTestsToml,
+			VirterDelayOn: "vm exec",
+			VirterDelay:   "1s",
+			ExtraArgs:     append([]string{"--nvms", "2", "--max-memory", "9G", "--max-vcpus", "8"}, extraArgs...),
+		})
+
+		require.Len(t, res.Results, 2)
+		for _, r := range res.Results {
+			assert.Equal(t, "SUCCESS", r.Status)
+		}
+		assert.Equal(t, 1, maxConcurrentVMs(res.VirterCalls),
+			"only one 4G test should run at a time with %v", extraArgs)
+	}
+}
+
 func TestResourceLimitWithoutVMCount(t *testing.T) {
 	// Without --nvms, the resource limit alone decides how many tests run
 	// in parallel. Two 4G VMs fit into 8G, so the access network is created

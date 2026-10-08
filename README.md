@@ -70,6 +70,16 @@ these values count as 4 vCPUs and 4G. Provisioning VMs count with
 default to 1 vCPU and 1G like in virter. Memory sizes accept the units of the
 `--memory` flag of virter, for example `512M`, `8G` or `8GiB`.
 
+The limits only cover the memory of the guests. Each running VM also occupies
+memory on the host for its QEMU process, and other processes such as vmshed
+itself need memory too. Pass `--vm-memory-overhead` to count additional memory
+for each VM, including provisioning VMs, and `--reserved-memory` to take a
+fixed amount off the memory limit:
+
+```
+vmshed --max-memory 84G --vm-memory-overhead 256M --reserved-memory 4G ...
+```
+
 When `--nvms` is not given, the number of VMs does not restrict scheduling.
 vmshed then reserves as many VM IDs as the limits could ever require. An
 explicit `--nvms` applies in addition to the resource limits. Its default of 12

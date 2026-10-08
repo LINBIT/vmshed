@@ -100,7 +100,8 @@ type testSuiteRun struct {
 	startVM            int
 	nrVMs              int
 	resourceLimit      resources // zero values mean unlimited
-	provisionResources resources
+	provisionResources resources // including vmMemoryOverhead
+	vmMemoryOverhead   uint64    // bytes counted per VM on top of its memory
 	firstV4Net         *net.IPNet
 	firstV6Net         *net.IPNet
 	onFailure          FailurePolicy
@@ -189,6 +190,8 @@ func rootCommand() *cobra.Command {
 	var nrVMs int
 	var maxVCPUs uint
 	var maxMemory memoryFlag
+	var vmMemoryOverhead memoryFlag
+	var reservedMemory memoryFlag
 	var onFailure FailurePolicy = OnFailureContinue
 	var quiet bool
 	var logFormatVirter string
@@ -292,6 +295,11 @@ current user.`,
 					suiteRun.resourceLimit.memory = memory
 				}
 			}
+			suiteRun.resourceLimit, err = reserveMemory(suiteRun.resourceLimit, uint64(reservedMemory))
+			if err != nil {
+				log.Fatalf("%v (adjust with --reserved-memory and --max-memory)", err)
+			}
+			addVMMemoryOverhead(&suiteRun, uint64(vmMemoryOverhead))
 			suiteRun.onFailure = onFailure
 			suiteRun.printErrorDetails = errorDetails
 			suiteRun.firstV4Net = firstV4Net
@@ -345,6 +353,8 @@ current user.`,
 	rootCmd.Flags().IntVarP(&nrVMs, "nvms", "", 12, "Maximum number of VMs to start in parallel, starting at -startvm. When not set, as many VMs as --max-vcpus and --max-memory allow; the default only applies with both limits disabled")
 	rootCmd.Flags().UintVar(&maxVCPUs, "max-vcpus", 0, "Maximum total number of vCPUs of the VMs running in parallel. Defaults to the CPUs of the host, 0 means unlimited")
 	rootCmd.Flags().Var(&maxMemory, "max-memory", "Maximum total memory of the VMs running in parallel, for example '64G'. Defaults to the memory of the host, 0 means unlimited")
+	rootCmd.Flags().Var(&vmMemoryOverhead, "vm-memory-overhead", "Memory counted against --max-memory for each VM on top of its own memory, for the memory that the VM process occupies on the host, for example '256M'")
+	rootCmd.Flags().Var(&reservedMemory, "reserved-memory", "Memory taken off --max-memory for processes besides the VMs, for example '4G'")
 	rootCmd.Flags().VarP(&onFailure, "on-failure", "", "What to do if a test fails: continue|terminate|keep-vms")
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "", false, "Don't print progess messages while tests are running")
 	rootCmd.Flags().StringVar(&logFormatVirter, "virter-log-format", "", "Log format that is passed to virter on vm exec")

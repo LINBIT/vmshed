@@ -198,6 +198,32 @@ func provisionResources(spec *vmSpecification) (resources, error) {
 	return resources{vcpus: vcpus, memory: memory}, nil
 }
 
+// addVMMemoryOverhead adds overhead to the memory demand of every VM, including
+// the provisioning VM, for the memory that a running VM occupies on the host
+// beyond its guest memory.
+func addVMMemoryOverhead(suiteRun *testSuiteRun, overhead uint64) {
+	suiteRun.vmMemoryOverhead = overhead
+	suiteRun.provisionResources.memory += overhead
+	for i := range suiteRun.testRuns {
+		run := &suiteRun.testRuns[i]
+		run.resources.memory += overhead * uint64(len(run.vms))
+	}
+}
+
+// reserveMemory returns limit with reserved taken off its memory, for memory
+// that is not available to the VMs. An unlimited memory limit stays unlimited.
+func reserveMemory(limit resources, reserved uint64) (resources, error) {
+	if limit.memory == 0 || reserved == 0 {
+		return limit, nil
+	}
+	if reserved >= limit.memory {
+		return resources{}, fmt.Errorf("reserved memory of %s leaves nothing of the %s memory limit",
+			formatMemory(reserved), formatMemory(limit.memory))
+	}
+	limit.memory -= reserved
+	return limit, nil
+}
+
 // smallestVMDemand returns the smallest memory and the smallest vcpus of any
 // VM that may run, including the provisioning VM. The two values need not
 // belong to the same VM.
@@ -221,6 +247,7 @@ func smallestVMDemand(suiteRun *testSuiteRun) resources {
 				// already validated when the run was created
 				continue
 			}
+			r.memory += suiteRun.vmMemoryOverhead
 			consider(r)
 		}
 	}
