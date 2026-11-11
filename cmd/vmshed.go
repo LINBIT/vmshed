@@ -184,6 +184,7 @@ func rootCommand() *cobra.Command {
 	var provisionOverrides []string
 	var baseImages []string
 	var excludeBaseImages []string
+	var vmTags []string
 	var toRun string
 	var repeats int
 	var startVM int
@@ -254,6 +255,7 @@ current user.`,
 			vmSpec.ProvisionFile = joinIfRel(filepath.Dir(vmSpecPath), vmSpec.ProvisionFile)
 			vmSpec.ProvisionTimeout = durationDefault(vmSpec.ProvisionTimeout, 3*time.Minute)
 			vmSpec.VMs = filterVMs(vmSpec.VMs, baseImages, excludeBaseImages)
+			vmSpec.VMs = matchingVMTags(vmTags, vmSpec.VMs)
 
 			var testSpec testSpecification
 			if _, err := toml.DecodeFile(testSpecPath, &testSpec); err != nil {
@@ -347,6 +349,7 @@ current user.`,
 	rootCmd.Flags().StringArrayVarP(&provisionOverrides, "set", "s", []string{}, "set/override provisioning steps, for example '--set values.X=y'")
 	rootCmd.Flags().StringSliceVarP(&baseImages, "base-image", "", []string{}, "VM base images to use (defaults to all)")
 	rootCmd.Flags().StringSliceVarP(&excludeBaseImages, "exclude-base-image", "", []string{}, "VM base images to exclude (defaults to none)")
+	rootCmd.Flags().StringSliceVarP(&vmTags, "vm-tag", "", []string{}, "only use VMs that have this tag; when given more than once, VMs must have all the tags (defaults to all VMs)")
 	rootCmd.Flags().StringVarP(&toRun, "torun", "", "all", "comma separated list of test names to execute ('all' is a reserved test name)")
 	rootCmd.Flags().IntVarP(&repeats, "repeats", "", 1, "number of times to repeat each test, expecting success on every attempt")
 	rootCmd.Flags().IntVarP(&startVM, "startvm", "", 2, "Number of the first VM to start in parallel")

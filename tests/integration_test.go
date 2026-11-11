@@ -886,6 +886,36 @@ func TestVMTags(t *testing.T) {
 	}
 }
 
+func TestVMTagFlag(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:   taggedVmsToml,
+		TestsToml: vmTagsTestsToml,
+		ExtraArgs: []string{"--vm-tag", "gpu", "--repeats", "10"},
+	})
+
+	require.Len(t, res.Results, 20)
+	for _, r := range res.Results {
+		require.Len(t, r.BaseImages, 1)
+		assert.Equal(t, "imageB", r.BaseImages[0],
+			"--vm-tag gpu should leave only imageB for every test")
+	}
+}
+
+func TestVMTagFlagAllTagsRequired(t *testing.T) {
+	res := runVmshed(t, vmshedOpts{
+		VmsToml:   taggedVmsToml,
+		TestsToml: vmTagsTestsToml,
+		ExtraArgs: []string{"--vm-tag", "fast", "--vm-tag", "gpu", "--torun", "anytest", "--repeats", "10"},
+	})
+
+	require.Len(t, res.Results, 10)
+	for _, r := range res.Results {
+		require.Len(t, r.BaseImages, 1)
+		assert.Equal(t, "imageB", r.BaseImages[0],
+			"only imageB has both the fast and the gpu tag")
+	}
+}
+
 func TestNetworkAddFail(t *testing.T) {
 	res := runVmshed(t, vmshedOpts{
 		VmsToml:      defaultVmsToml,

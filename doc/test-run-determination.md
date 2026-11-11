@@ -40,7 +40,9 @@ platforms wildcard is used or multiple repeats are requested.
 VM base images must be assigned to each test run. The available base images are
 defined by the `vms` entries in the VM specification. They are filtered by:
 
-* `--base-image` flag
+* `--base-image` and `--exclude-base-image` flags
+* `--vm-tag` flag: the `vm_tags` array in the `vms` entry must contain every
+  tag given
 * The `vm_tags` array in the `vms` entry must be a superset of:
   * `vm_tags` in the `tests` table in the test specification for the test in
     question; and
